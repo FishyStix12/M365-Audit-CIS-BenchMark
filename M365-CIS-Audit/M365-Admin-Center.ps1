@@ -19,6 +19,9 @@ $customModulePath = ".\powershell\modules"
 Save-Module -Name Az -Scope CurrentUser -Force -Path $customModulePath
 Save-Module -Name ExchangeOnlineManagement -Scope CurrentUser -Force -Path $customModulePath
 
+#Adds custom module path to the environment variable PSModulePath.
+$env:PSModulePath += $customModulePath
+
 # Import necessary modules
 Import-Module -Name "$customModulePath\Az" -Prefix Custom -Scope Global -Force
 Import-Module -Name "$customModulePath\ExchangeOnlineManagement" -Prefix Custom -Scope Global -Force
