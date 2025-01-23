@@ -49,7 +49,7 @@ $tenatID = (Get-AzContext).Tenant.Id
 
 #  Connect to Account
 # Connect to Azure AD with the necessary permissions for directory roles and user data.
-Connect-AzAccount -TenantId $tenantID
+Connect-AzAccount -TenantId $tenatID
 
 # Connect to Exchange Online
 Connect-ExchangeOnline
@@ -168,33 +168,34 @@ $FormattedReport = $Report | ForEach-Object {
 $FormattedReport -join "`n" | Set-Content -Path "C:\Reports\M365AdminCenter.txt"
 
 # Control 1.2.1: Ensure that only organizationally managed/approved public groups exist.
-#  Initialize the report for 1.2.1
-$Report2 = [System.Collections.Generic.List[Object]]::new()
+# Initialize the report for 1.2.1
+$Report4 = [System.Collections.Generic.List[Object]]::new()
 
-#  Add control message to the report
-$Control2 = "Control: 1.2.1 Ensure that only organizationally managed/approved public groups exist."
-$Report2.Add($Control2)
+# Add control message to the report
+$Control4 = "Control: 1.2.1 Ensure that only organizationally managed/approved public groups exist."
+$Report4.Add($Control4)
 
-#  Retrieve all public groups in the tenant
+# Prompt the user to enter approved group names
+$ApprovedGroups = @()
+while ($true) {
+    $groupName = Read-Host -Prompt "Enter the name of an approved public group (or press Enter to finish)"
+    if ([string]::IsNullOrWhiteSpace($groupName)) {
+        break
+    }
+    $ApprovedGroups += $groupName
+}
+
+# Retrieve all public groups in the tenant
 # This retrieves all groups that are public.
 # - `Get-MgGroup`: Retrieves all groups, filtering by the group type 'Unified' and visibility 'Public'.
 $PublicGroups = Get-MgGroup -Filter "groupTypes/any(c:c eq 'Unified')" -Property DisplayName,Visibility -All | Where-Object { $_.Visibility -eq "Public" }
 
-#  Define the list of approved groups
--
-# Define a list of approved public groups. This should be managed by your organization.
-$ApprovedGroups = @(
-    "Approved Group 1",
-    "Approved Group 2",
-    "Approved Group 3"
-)
-
-#  Check if public groups are approved
+# Check if public groups are approved
 # Loop through each public group and check if it is in the list of approved groups.
 # - `Where-Object`: Filters groups that are not in the list of approved groups.
 $NonApprovedGroups = $PublicGroups | Where-Object { -not ($ApprovedGroups -contains $_.DisplayName) }
 
-#  Output the approval status of each group
+# Output the approval status of each group
 foreach ($Group in $PublicGroups) {
     if ($ApprovedGroups -contains $Group.DisplayName) {
         Write-Host "Group '$($Group.DisplayName)' is approved."
@@ -203,19 +204,19 @@ foreach ($Group in $PublicGroups) {
     }
 }
 
-# STEP 8: Generate a report of non-approved groups
+# Generate a report of non-approved groups
 # Create a report for any groups that are not approved.
 $NonApprovedGroups | ForEach-Object {
     $GroupObject = [pscustomobject][ordered]@{
         DisplayName = $_.DisplayName
         Visibility  = $_.Visibility
     }
-    $Report2.Add($GroupObject)
+    $Report4.Add($GroupObject)
 }
 
 # Save the report to a text file
 # Format the report entries for better readability.
-$FormattedReport2 = $Report2 | ForEach-Object {
+$FormattedReport2 = $Report4 | ForEach-Object {
     if ($_ -is [pscustomobject]) {
         "DisplayName: $_.DisplayName`nVisibility: $_.Visibility`n"
     } else {
@@ -471,7 +472,7 @@ $Control9 = "7.2.7: Ensure link sharing is restricted in SharePoint and OneDrive
 $Report9.Add($Control9)
 
 #  Run the following Powershell Command
-$LinkSharking = Get-SPOTenant | fl DefaultSharingLinkType
+$LinkSharking = Get-SPOTenant | Format-List DefaultSharingLinkType
 if ($LinkSharking -eq "Direct") {
     $output = "Link sharing is restricted. Control passed."
 }
@@ -491,11 +492,11 @@ $Report10 = [System.Collections.Generic.List[Object]]::new()
 
 # Add a message specifying the control being implemented.
 $Control10 = "7.2.9: Ensure guest access to a site or OneDrive will expire automatically."
-$Report10.Add($Control0)
+$Report10.Add($Control10)
 
 #  Run the following Powershell Command
-$UserExpire = Get-SPOTenant | fl ExternalUserExpirationRequired
-$DaysExpire = Get-SPOTenant | fl ExternalUserExpireInDays
+$UserExpire = Get-SPOTenant | Format-List ExternalUserExpirationRequired
+$DaysExpire = Get-SPOTenant | Format-List ExternalUserExpireInDays
 if ($UserExpire -eq "True") {
     $output = "Guest access will expire automatically. Control passed."
 }
@@ -525,7 +526,7 @@ $Control11 = "7.2.11: Ensure the SharePoint default sharing link permission is s
 $Report11.Add($Control11)
 
 #  Run the following Powershell Command
-$LinkPermission = Get-SPOTenant | fl DefaultLinkPermission
+$LinkPermission = Get-SPOTenant | Format-List DefaultLinkPermission
 if ($LinkPermission -eq "View") {
     $output = "Default sharing link permission is set to View. Control passed."
 }
@@ -571,7 +572,7 @@ $Control13 = "8.1.1: Ensure external file sharing in Teams is enabled for only a
 $Report13.Add($Control13)
 
 #  Run the following PowerShell Command
-$ApprovedServices = Get-CsTeamsClientConfiguration | fl AllowDropbox,AllowBox,AllowGoogleDrive,AllowShareFile,AllowEgnyte
+$ApprovedServices = Get-CsTeamsClientConfiguration | Format-List AllowDropbox,AllowBox,AllowGoogleDrive,AllowShareFile,AllowEgnyte
 
 # Convert the output to a string
 $ApprovedServicesString = $ApprovedServices | Out-String
@@ -589,7 +590,7 @@ $Control14 = "8.1.2: Ensure users can't send emails to a channel email address."
 $Report14.Add($Control14)
 
 #  Run the following PowerShell Command
-$ChannelAddress = Get-CsTeamsClientConfiguration -Identity Global | fl AllowEmailIntoChannel 
+$ChannelAddress = Get-CsTeamsClientConfiguration -Identity Global | Format-List AllowEmailIntoChannel 
 if ($ChannelAddress.AllowEmailIntoChannel -eq $false) {
     $output = "Users can't send emails to a channel email address. Control passed."
 }
@@ -639,7 +640,7 @@ $Control16 = "8.2.2: Ensure communication with unmanaged Teams users is disabled
 $Report16.Add($Control16)
 
 #  Run the following PowerShell Command
-$TeamsComms = Get-CsTenantFederationConfiguration | fl AllowTeamsConsumer 
+$TeamsComms = Get-CsTenantFederationConfiguration | Format-List AllowTeamsConsumer 
 if ($TeamsComms.AllowTeamsConsumer -eq $false) {
     $output = "Communication with unmanaged Teams users is disabled. Control passed."
 }
@@ -661,7 +662,7 @@ $Control17 = "8.2.3: Ensure external Teams users cannot initiate conversations."
 $Report17.Add($Control17)
 
 #  Run the following PowerShell Command
-$Inbound = Get-CsTenantFederationConfiguration | fl AllowTeamsConsumerInbound 
+$Inbound = Get-CsTenantFederationConfiguration | Format-List AllowTeamsConsumerInbound 
 if ($Inbound.AllowTeamsConsumerInbound -eq $false) {
     $output = "External Teams users cannot initiate conversations. Control passed."
 }
@@ -683,7 +684,7 @@ $Control18 = "8.5.1: Ensure anonymous users can't join a meeting."
 $Report18.Add($Control18)
 
 #  Run the following PowerShell Command
-$Anonjoin = Get-CsTeamsMeetingPolicy -Identity Global | fl AllowAnonymousUsersToJoinMeeting 
+$Anonjoin = Get-CsTeamsMeetingPolicy -Identity Global | Format-List AllowAnonymousUsersToJoinMeeting 
 if ($Anonjoin.AllowAnonymousUsersToJoinMeeting -eq $false) {
     $output = "Anonymous users can't join a meeting. Control passed."
 }
@@ -705,7 +706,7 @@ $Control19 = "8.5.2: Ensure anonymous users and dial-in callers can't start a me
 $Report19.Add($Control19)
 
 # Run the following PowerShell Command
-$AnonDialer = Get-CsTeamsMeetingPolicy -Identity Global | fl AllowAnonymousUsersToStartMeeting 
+$AnonDialer = Get-CsTeamsMeetingPolicy -Identity Global | Format-List AllowAnonymousUsersToStartMeeting 
 if ($AnonDialer.AllowAnonymousUsersToStartMeeting -eq $false) {
     $output = "Anonymous users and dial-in callers can't start a meeting. Control passed."
 }
@@ -727,7 +728,7 @@ $Control20 = "8.5.3: Ensure only people in my org can bypass the lobby."
 $Report20.Add($Control20)
 
 # Run the following PowerShell Command
-$LobBypass = Get-CsTeamsMeetingPolicy -Identity Global | fl AutoAdmittedUsers
+$LobBypass = Get-CsTeamsMeetingPolicy -Identity Global | Format-List AutoAdmittedUsers
 if ($LobBypass.AutoAdmittedUsers -eq "EveryoneInCompanyExcludingGuests") {
     $output = "Only people in my org can bypass the lobby. Control passed."
 }
@@ -749,7 +750,7 @@ $Control21 = "8.5.5: Ensure meeting chat does not allow anonymous users."
 $Report21.Add($Control21)
 
 # Run the following PowerShell Command
-$BlockAnon = Get-CsTeamsMeetingPolicy -Identity Global | fl MeetingChatEnabledType
+$BlockAnon = Get-CsTeamsMeetingPolicy -Identity Global | Format-List MeetingChatEnabledType
 if ($BlockAnon.MeetingChatEnabledType -eq "DisabledForAnonymousUsers" -or $BlockAnon.MeetingChatEnabledType -eq "EnabledExceptAnonymous") {
     $output = "Meeting chat does not allow anonymous users. Control passed."
 }
@@ -771,7 +772,7 @@ $Control22 = "8.5.6: Ensure only organizers and co-organizers can present."
 $Report22.Add($Control22)
 
 # Run the following PowerShell Command
-$CoOrg = Get-CsTeamsMeetingPolicy -Identity Global | fl DesignatedPresenterRoleMode 
+$CoOrg = Get-CsTeamsMeetingPolicy -Identity Global | Format-List DesignatedPresenterRoleMode 
 if ($CoOrg.DesignatedPresenterRoleMode -eq "OrganizerOnly" -or $CoOrg.DesignatedPresenterRoleMode -eq "CoOrganizerAndOrganizer" -or $CoOrg.DesignatedPresenterRoleMode -eq "OrganizerOnlyUserOverride") {
     $output = "Only organizers and co-organizers can present. Control passed."
 }
@@ -793,7 +794,7 @@ $Control23 = "8.5.8: Ensure external meeting chat is off."
 $Report23.Add($Control23)
 
 # Run the following PowerShell Command
-$ExMeet = Get-CsTeamsMeetingPolicy -Identity Global | fl AllowExternalNonTrustedMeetingChat
+$ExMeet = Get-CsTeamsMeetingPolicy -Identity Global | Format-List AllowExternalNonTrustedMeetingChat
 if ($ExMeet.AllowExternalNonTrustedMeetingChat -eq $false) {
     $output = "External meeting chat is off. Control passed."
 }
@@ -815,8 +816,8 @@ $Control24 = "Control 8.6.1: Ensure users can report security concerns in Teams.
 $Report24.Add($Control24)
 
 # Run the following PowerShell Command
-$Teams =  Get-CsTeamsMessagingPolicy -Identity Global | fl AllowSecurityEndUserReporting
-$Defender = Get-ReportSubmissionPolicy | fl Report*
+$Teams =  Get-CsTeamsMessagingPolicy -Identity Global | Format-List AllowSecurityEndUserReporting
+$Defender = Get-ReportSubmissionPolicy | Format-List Report*
 $SOCAddress = Read-Host -Prompt "Please enter the SOC email address/Custom Email Address Reported Emails get sent to: "
 if ($Teams.AllowSecurityEndUserReporting -eq $true -and 
     $Defender.ReportJunkToCustomizedAddress -eq $true -and 
