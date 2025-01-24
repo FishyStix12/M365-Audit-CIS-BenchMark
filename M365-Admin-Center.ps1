@@ -227,8 +227,11 @@ while ($true) {
 
 # Retrieve all public groups in the tenant
 # This retrieves all groups that are public.
-# - `Get-MgGroup`: Retrieves all groups, filtering by the group type 'Unified' and visibility 'Public'.
-$PublicGroups = Get-MgGroup -Filter "groupTypes/any(c:c eq 'Unified')" -Property DisplayName,Visibility -All | Where-Object { $_.Visibility -eq "Public" }
+# Retrieve all public groups in the tenant
+# This retrieves all groups that are public.
+# - `Get-AzureADGroup`: Retrieves all groups, filtering by the group type 'Unified' and visibility 'Public'.
+# Retrieve all groups and filter for public groups
+$PublicGroups = Get-AzureADGroup | Where-Object { $_.GroupTypes -contains "Unified" -and $_.Visibility -eq "Public" }
 
 # Check if public groups are approved
 # Loop through each public group and check if it is in the list of approved groups.
@@ -279,10 +282,9 @@ $Report5.Add($Control5)
 # Get all mailboxes that are of type 'SharedMailbox'.
 $MBX = Get-EXOMailbox -RecipientTypeDetails SharedMailbox
 
-# Loop through each shared mailbox and retrieve user details
 $MBX | ForEach-Object {
     # Get user details for the shared mailbox using its ExternalDirectoryObjectId.
-    $user = Get-MgUser -UserId $_.ExternalDirectoryObjectId -Property DisplayName, UserPrincipalName, AccountEnabled
+    $user = Get-MsolUser -ObjectId $_.ExternalDirectoryObjectId
     # Add the user details to the report, including whether sign-in is allowed.
     $Report5.Add([PSCustomObject]@{
         DisplayName = $user.DisplayName
