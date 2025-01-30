@@ -31,7 +31,7 @@ Save-Module -Name MSOnline -Force -Path $customModulePath
 Save-Module -Name ExchangeOnlineManagement -Force -Path $customModulePath
 Save-Module -Name MicrosoftTeams -Force -Path $customModulePath
 Save-Module -Name SharePointPnPPowerShellOnline -Force -Path $customModulePath
-Save-Module -Name AzPurview -Force -Path $customModulePath
+Save-Module -Name Az.Purview -Force -Path $customModulePath
 Save-Module -Name Microsoft.Graph -Force -Path $customModulePath
 #Adds custom module path to the environment variable PSModulePath.
 $env:PSModulePath += ";$customModulePath"
@@ -46,7 +46,7 @@ Import-Module -Name "$customModulePath\MSOnline" -Force
 Import-Module -Name "$customModulePath\ExchangeOnlineManagement" -Force
 Import-Module -Name "$customModulePath\MicrosoftTeams" -Force
 Import-Module -Name "$customModulePath\SharePointPnPPowerShellOnline" -Force
-Import-Module -Name "$customModulePath\AzPurview" -Force
+Import-Module -Name "$customModulePath\Az.Purview" -Force
 Import-Module -Name "$customModulePath\Microsoft.Graph" -Force
 
 # Check if the modules are imported successfully
@@ -55,14 +55,13 @@ if (-not (Get-Module -Name MSOnline)) { Write-Error "MSOnline module not importe
 if (-not (Get-Module -Name ExchangeOnlineManagement)) { Write-Error "ExchangeOnlineManagement module not imported" }
 if (-not (Get-Module -Name MicrosoftTeams)) { Write-Error "MicrosoftTeams module not imported" }
 if (-not (Get-Module -Name SharePointPnPPowerShellOnline)) { Write-Error "SharePointPnPPowerShellOnline module not imported" }
-if (-not (Get-Module -Name AzPurview)) { Write-Error "AzPurview module not imported" }
+if (-not (Get-Module -Name Az.Purview)) { Write-Error "AzPurview module not imported" }
 
 #Get tenant ID
-$tenatID = (Get-AzContext).Tenant.Id
+$tenantID = Read-Host-Host "Please enter your tenant ID to connect to Azure AD."
 
-#  Connect to Account
 # Connect to Azure AD with the necessary permissions for directory roles and user data.
-Connect-AzAccount -TenantId $tenatID
+Connect-AzAccount -TenantId $tenantID
 
 # Connect to Exchange Online
 Connect-ExchangeOnline
