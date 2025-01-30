@@ -31,7 +31,7 @@ if (-not (Get-Module -Name AzureAD)) { Write-Error "AzureAD module not imported"
 if (-not (Get-Module -Name ExchangeOnlineManagement)) { Write-Error "ExchangeOnlineManagement module not imported" }
 
 #Get tenant ID
-$tenatID = (Get-AzContext).Tenant.Id
+$tenantID = Read-Host-Host "Please enter your tenant ID to connect to Azure AD:"
 
 #  Connect to Account
 # Connect to Azure AD with the necessary permissions for directory roles and user data.
