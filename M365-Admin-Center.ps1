@@ -35,7 +35,7 @@ $tenantID = Read-Host-Host "Please enter your tenant ID to connect to Azure AD:"
 
 #  Connect to Account
 # Connect to Azure AD with the necessary permissions for directory roles and user data.
-Connect-AzAccount -TenantId $tenatID
+Connect-AzAccount -TenantId $tenantID
 
 # Connect to Exchange Online
 Connect-ExchangeOnline
