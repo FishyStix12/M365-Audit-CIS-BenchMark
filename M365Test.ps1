@@ -58,7 +58,7 @@ if (-not (Get-Module -Name SharePointPnPPowerShellOnline)) { Write-Error "ShareP
 if (-not (Get-Module -Name Az.Purview)) { Write-Error "AzPurview module not imported" }
 
 #Get tenant ID
-$tenantID = Read-Host-Host "Please enter your tenant ID to connect to Azure AD."
+$tenantID = Read-Host-Host "Please enter your tenant ID to connect to Azure AD:"
 
 # Connect to Azure AD with the necessary permissions for directory roles and user data.
 Connect-AzAccount -TenantId $tenantID
