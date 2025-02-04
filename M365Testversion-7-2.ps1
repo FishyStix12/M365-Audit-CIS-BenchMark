@@ -9,6 +9,88 @@
 # to streamline the evaluation of M365 configurations against the CIS Benchmark, ensuring
 # compliance with security best practices and enhancing the overall security posture.
 #################################################################################################
+$originalLimit = $ExecutionContext.SessionState.MaxFunctionCount
+
+$ExecutionContext.SessionState.Applications.MaximumFunctionCount = 20000
+
+# ===========================================
+# PowerShell Script: Temporary NuGet Package Installation
+# This script:
+# 1. Checks if NuGet CLI is installed, downloads it if missing.
+# 2. Ensures the NuGet package source is registered.
+# 3. Installs the required NuGet package (Microsoft.Extensions.Logging.Abstractions v1.1.2).
+# 4. Loads the installed package dynamically.
+# 5. Cleans up temporary files and NuGet CLI after execution.
+# ===========================================
+
+# Step 1: Define Paths and Variables
+$nugetExe = "$env:TEMP\nuget.exe"  # Path for temporary NuGet CLI
+$nugetUrl = "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe"  # Official NuGet download URL
+$nugetSource = "https://api.nuget.org/v3/index.json"  # NuGet package repository URL
+$packageName = "Microsoft.Extensions.Logging.Abstractions"  # The package we want to install
+$packageVersion = "1.1.2"  # The specific version we need
+$tempDir = "$env:TEMP\LoggingAbstractions"  # Temporary directory for storing the package
+
+# Step 2: Check if NuGet CLI is Installed
+$NuGetExists = $false
+$globalNuGet = Get-Command nuget -ErrorAction SilentlyContinue  # Check if NuGet is available globally
+
+if ($globalNuGet) {
+    $NuGetExists = $true
+    Write-Host "NuGet CLI is already installed: $($globalNuGet.Source)"
+} elseif (Test-Path $nugetExe) {
+    $NuGetExists = $true
+    Write-Host "NuGet CLI found in temporary location: $nugetExe"
+} else {
+    Write-Host "NuGet CLI not found, downloading..."
+    Invoke-WebRequest -Uri $nugetUrl -OutFile $nugetExe  # Download NuGet CLI if missing
+}
+
+# Step 3: Verify NuGet CLI Execution
+if (Test-Path $nugetExe) {
+    Write-Host "NuGet Version Check:"
+    & "$nugetExe" help | Select-String "NuGet Version"  # Verify that NuGet CLI is working
+} else {
+    Write-Host "Error: NuGet CLI is missing!"
+    exit 1  # Exit the script if NuGet CLI is not found
+}
+
+# Step 4: Ensure NuGet Source is Available
+Write-Host "Checking NuGet sources..."
+$existingSources = & "$nugetExe" sources list  # List registered package sources
+
+if ($existingSources -notmatch [regex]::Escape($nugetSource)) {
+    Write-Host "Adding NuGet source: $nugetSource"
+    & "$nugetExe" sources add -Name "nuget.org" -Source $nugetSource  # Register NuGet repository if missing
+} else {
+    Write-Host "NuGet source already exists."
+}
+
+# Step 5: Check if the Package is Already Installed
+$AssembleCheck = (Get-Package -Name $packageName -ErrorAction SilentlyContinue).Version  # Check if package exists
+
+# Convert version string to [System.Version] for accurate comparison
+if (-not $AssembleCheck -or [System.Version]$AssembleCheck -ne [System.Version]$packageVersion) {
+    Write-Host "Installing $packageName v$packageVersion..."
+    
+    # Ensure temporary package directory exists
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+    # Install the package using NuGet CLI
+    & "$nugetExe" install $packageName -Version $packageVersion -OutputDirectory $tempDir -Source $nugetSource
+}
+
+# Step 6: Locate and Load the DLL
+$dllPath = Get-ChildItem -Path "$tempDir" -Recurse -Filter "$packageName.dll" | Select-Object -ExpandProperty FullName
+
+if ($dllPath) {
+    Write-Host "Loading assembly from: $dllPath"
+    [System.Reflection.Assembly]::LoadFrom($dllPath) | Out-Null  # Dynamically load the assembly
+    Write-Host "Package $packageName version $packageVersion loaded successfully!"
+} else {
+    Write-Host "Error: Package DLL not found!"
+}
+
 # Define the custom module path
 $customModulePath = ".\powershell\modules"
 
@@ -22,6 +104,7 @@ if (-not (Test-Path -Path $outputPath)) {
     New-Item -ItemType Directory -Path $outputPath -Force
 }
 $reportFile = Join-Path -Path $outputPath -ChildPath "M365AdminCenter.txt"
+
 
 # Install necessary modules
 Save-Module -Name Az -Force -Path $customModulePath
@@ -57,52 +140,41 @@ if (-not (Get-Module -Name MicrosoftTeams)) { Write-Error "MicrosoftTeams module
 if (-not (Get-Module -Name SharePointPnPPowerShellOnline)) { Write-Error "SharePointPnPPowerShellOnline module not imported" }
 if (-not (Get-Module -Name Az.Purview)) { Write-Error "AzPurview module not imported" }
 
-#Get tenant ID
-$tenantID = Read-Host-Host "Please enter your tenant ID to connect to Azure AD:"
-
+#  Connect to Account
 # Connect to Azure AD with the necessary permissions for directory roles and user data.
+$tenantID = Read-Host-Host "Please enter your tenant ID to connect to Azure AD: "
 Connect-AzAccount -TenantId $tenantID
 
 # Connect to Exchange Online
 Connect-ExchangeOnline
 
+Connect-AzureAD 
+
 # Connect to Microsoft Teams
 Connect-MicrosoftTeams
 
-Connect-MsolService
+Connect-AzureAD 
+
+Connect-SPOservice
 
 # Connect to SharePoint Online
 $tenantURL = Read-Host -Prompt "Please enter your SharePoint Tenant URL: "
-Connect-PnPOnline -Url "$($tenantURL)"
-#If command above doesn't work, try this:
-Connect-SPOService -Url "$($tenantURL)"
+Connect-PnPOnline -Url "$($tenantURL)" -UseWebLogin
 
-#  Retrieve all directory roles in the tenant
-# This retrieves all roles in the directory (e.g., Global Admin, Exchange Admin, etc.).
-# - `Get-AzureADDirectoryRole`: Fetches all directory roles in the Azure AD tenant.
+# Get all directory roles in the Azure AD tenant
 $DirectoryRoles = Get-AzureADDirectoryRole
 
-#  Filter privileged roles
-# Only include roles that have "Administrator" in their name or are "Global Reader."
-# - `Where-Object`: Filters objects based on specified criteria.
-# - `-like`: String comparison operator for pattern matching.
+# Filter privileged roles
 $PrivilegedRoles = $DirectoryRoles | Where-Object { 
     $_.DisplayName -like "*Administrator*" -or $_.DisplayName -eq "Global Reader" 
 }
 
-#  Get the members of these roles
-# For each role, retrieve the list of users assigned to it. We filter for unique user IDs.
-# - `ForEach-Object`: Iterates over each object in the input.
-# - `Get-AzureADDirectoryRoleMember`: Retrieves members of a specified directory role.
-# - `Select-Object`: Selects specific properties of an object.
-# - `-Unique`: Ensures unique entries.
+# Get the members of these roles
 $RoleMembers = $PrivilegedRoles | ForEach-Object { 
     Get-AzureADDirectoryRoleMember -ObjectId $_.ObjectId 
 } | Select-Object ObjectId -Unique
 
-#  Retrieve detailed information for privileged users
-# For every member of these roles, fetch user details like DisplayName, UserPrincipalName, and ObjectId.
-# - `Get-AzureADUser`: Fetches detailed information about a specified user.
+# Retrieve detailed information for privileged users
 if (-not (Get-Module -Name Az)) { Write-Error "Az module not imported" }
 if (-not (Get-Module -Name PnP.PowerShell)) { Write-Error "PnP.PowerShell module not imported" }
 if (-not (Get-Module -Name Microsoft.Graph)) { Write-Error "Microsoft.Graph module not imported" }
@@ -110,79 +182,42 @@ $PrivilegedUsers = $RoleMembers | ForEach-Object {
     Get-AzureADUser -ObjectId $_.ObjectId | Select-Object UserPrincipalName, DisplayName, ObjectId 
 }
 
-#  Initialize the report and counters
-# Create an empty list to store the report data for each user.
-# - `[System.Collections.Generic.List[Object]]::new()`: Creates a new generic list to store objects.
-# Also, initialize counters to count the number of True and False values for P1/P2 licenses.
+# Initialize the report and counters
 $Report = [System.Collections.Generic.List[Object]]::new()
 $TrueCount = 0
 $FalseCount = 0
+$FalseUsers = @()
 
 # Add a message specifying the control being implemented.
 $Control = "Control: 1.1.4 Ensure administrative accounts use licenses with a reduced application footprint."
 $Report.Add($Control)
 
-#  Build the report for each user
+# Build the report for each user
 foreach ($Admin in $PrivilegedUsers) {
     # Retrieve the licenses assigned to the user
-    # - `(Get-AzureADUserLicenseDetail -ObjectId $Admin.ObjectId).SkuPartNumber`: Retrieves license details for the user and joins them into a single string.
-    $License = $null
     $License = (Get-AzureADUserLicenseDetail -ObjectId $Admin.ObjectId).SkuPartNumber -join ", "
 
     # Check if the user has an Entra Premium P1 or P2 license
-    # The SKU part numbers are "AAD_PREMIUM_P1" and "AAD_PREMIUM_P2"
-    # - `-match`: Checks if the string matches the specified pattern.
-    $HasP1OrP2 = if ($License -match "AAD_PREMIUM_P1|AAD_PREMIUM_P2") {
-        $true
-    } else {
-        $false
-    }
+    $HasP1P2License = $License -match "ENTERPRISEPREMIUM|ENTERPRISEPREMIUM_P2"
 
-    # Increment counters based on the license check
-    if ($HasP1OrP2) {
+    # Increment the counters based on the license check
+    if ($HasP1P2License) {
         $TrueCount++
     } else {
         $FalseCount++
-    }
-
-    # Create a row for this user with the required data
-    # - `[pscustomobject][ordered]@{}`: Creates an ordered custom object with specified properties.
-    $Object = [pscustomobject][ordered]@{
-        DisplayName       = $Admin.DisplayName       # User's full name
-        UserPrincipalName = $Admin.UserPrincipalName # User's email address
-        License           = $License                # Licenses assigned to the user
-        HasP1OrP2         = $HasP1OrP2              # True or False for Entra P1/P2 license
-    }
-
-    # Add this user's data to the report
-    $Report.Add($Object)
-}
-
-#  Add counts to the report
-# Create objects to store the counts of True and False values and add them to the report.
-$TrueObject = [pscustomobject][ordered]@{
-    CountType = "Has Entra Premium P1 or P2 License"
-    Count     = $TrueCount
-}
-$FalseObject = [pscustomobject][ordered]@{
-    CountType = "Does Not Have Entra Premium P1 or P2 License"
-    Count     = $FalseCount
-}
-$Report.Add($TrueObject)
-$Report.Add($FalseObject)
-
-# Format the report entries for better readability.
-# - `ForEach-Object`: Iterates over each object to format it.
-# - `Out-String`: Converts objects to a string representation.
-# - `Add-Content`: Writes the formatted string to a specified file.
-$FormattedReport = $Report | ForEach-Object {
-    if ($_ -is [pscustomobject]) {
-        "DisplayName: $_.DisplayName`nUserPrincipalName: $_.UserPrincipalName`nLicense: $_.License`nHasP1OrP2: $_.HasP1OrP2`n"
-    } else {
-        $_
+        $FalseUsers += $Admin.UserPrincipalName
     }
 }
-$FormattedReport -join "`n" | Add-Content -Path $reportFile
+
+# Add the summary to the report
+$Report.Add("$TrueCount admins have the P1 or P2 License.")
+if ($FalseCount -gt 0) {
+    $FalseUsersList = $FalseUsers -join ", "
+    $Report.Add("$FalseCount admins do not have the P1 or P2 License. The admins who do not are: $FalseUsersList")
+}
+
+# Join the formatted report entries into a single string and save it to a text file.
+$Report -join "`n" | Add-Content -Path "C:\Reports\M365AdminCenter.txt"
 
 # Control 1.2.1: Ensure that only organizationally managed/approved public groups exist.
 # Initialize the report for 1.2.1
@@ -192,64 +227,30 @@ $Report4 = [System.Collections.Generic.List[Object]]::new()
 $Control4 = "Control: 1.2.1 Ensure that only organizationally managed/approved public groups exist."
 $Report4.Add($Control4)
 
-# Prompt the user to enter approved group names
-$ApprovedGroups = @()
-while ($true) {
-    $groupName = Read-Host -Prompt "Enter the name of an approved public group (or press Enter to finish)"
-    if ([string]::IsNullOrWhiteSpace($groupName)) {
-        break
-    }
-    $ApprovedGroups += $groupName
-}
-
 # Retrieve all public groups in the tenant
 # This retrieves all groups that are public.
-# - `Get-AzureADGroup`: Retrieves all groups, filtering by the group type 'Unified' and visibility 'Public'.
-# Retrieve all groups and filter for public groups
 $PublicGroups = Get-AzureADGroup | Where-Object { $_.GroupTypes -contains "Unified" -and $_.Visibility -eq "Public" }
 
-# Check if public groups are approved
-# Loop through each public group and check if it is in the list of approved groups.
-# - `Where-Object`: Filters groups that are not in the list of approved groups.
-$NonApprovedGroups = $PublicGroups | Where-Object { -not ($ApprovedGroups -contains $_.DisplayName) }
-
-# Output the approval status of each group
-foreach ($Group in $PublicGroups) {
-    if ($ApprovedGroups -contains $Group.DisplayName) {
-        Write-Host "Group '$($Group.DisplayName)' is approved."
-    } else {
-        Write-Host "Group '$($Group.DisplayName)' is NOT approved."
-    }
+# Add each public group to the report
+$PublicGroups | ForEach-Object {
+    $Report4.Add($_.DisplayName)
 }
 
-# Generate a report of non-approved groups
-# Create a report for any groups that are not approved.
-$NonApprovedGroups | ForEach-Object {
-    $GroupObject = [pscustomobject][ordered]@{
-        DisplayName = $_.DisplayName
-        Visibility  = $_.Visibility
-    }
-    $Report4.Add($GroupObject)
-}
+# Add the message to the report
+$Report4.Add("Check on these in the appropriate discovery session.")
 
 # Save the report to a text file
 # Format the report entries for better readability.
-$FormattedReport2 = $Report4 | ForEach-Object {
-    if ($_ -is [pscustomobject]) {
-        "DisplayName: $_.DisplayName`nVisibility: $_.Visibility`n"
-    } else {
-        $_
-    }
-}
-$FormattedReport2 -join "`n" | Add-Content -Path $reportFile
+$FormattedReport4 = $Report4 | ForEach-Object { $_.ToString() }
+$FormattedReport4 -join "`n" | Add-Content -Path $reportFile
 
 # Control 1.2.2: Ensure sign-in to shared mailboxes is blocked.
 
-#  Initialize the report for 1.2.2
+# Initialize the report for 1.2.2
 # Create a new list to store the report data for each shared mailbox.
 $Report3 = [System.Collections.Generic.List[Object]]::new()
 
-#  Add control message to the report
+# Add control message to the report
 $Control3 = "Control: 1.2.2 Ensure sign-in to shared mailboxes is blocked."
 $Report3.Add($Control3)
 
@@ -257,48 +258,45 @@ $Report3.Add($Control3)
 # Get all mailboxes that are of type 'SharedMailbox'.
 $MBX = Get-EXOMailbox -RecipientTypeDetails SharedMailbox
 
+# Initialize lists to store UserPrincipalNames based on sign-in status
+$SignInAllowedUsers = @()
+$SignInBlockedUsers = @()
+
 # Loop through each shared mailbox and retrieve user details
 $MBX | ForEach-Object {
     # Get user details for the shared mailbox using its ExternalDirectoryObjectId.
     $user = Get-MsolUser -ObjectId $_.ExternalDirectoryObjectId
-    # Add the user details to the report, including whether sign-in is allowed.
-    $Report3.Add([PSCustomObject]@{
-        DisplayName = $user.DisplayName
-        UserPrincipalName = $user.UserPrincipalName
-        AccountEnabled = $user.AccountEnabled
-        # Determine if sign-in is allowed based on the AccountEnabled property.
-        SignInAllowed = if ($user.AccountEnabled) { $true } else { $false }
-    })
+    # Determine if sign-in is allowed based on the AccountEnabled property.
+    if ($user.AccountEnabled) {
+        $SignInAllowedUsers += $user.UserPrincipalName
+    } else {
+        $SignInBlockedUsers += $user.UserPrincipalName
+    }
 }
 
 # Count the true and false values
-# Count the number of shared mailboxes where sign-in is allowed (true).
-$trueCount = ($Report3 | Where-Object { $_.SignInAllowed -eq $true }).Count
-# Count the number of shared mailboxes where sign-in is blocked (false).
-$falseCount = ($Report3 | Where-Object { $_.SignInAllowed -eq $false }).Count
+$trueCount = $SignInAllowedUsers.Count
+$falseCount = $SignInBlockedUsers.Count
 
-# Output the counts
-# Add the counts of true and false values to the report.
-$Report3.Add("True (Sign-in allowed): $trueCount")
-$Report3.Add("False (Sign-in blocked): $falseCount")
+# Add the summary to the report
+if ($trueCount -gt 0) {
+    $SignInAllowedUsersList = $SignInAllowedUsers -join ", "
+    $Report3.Add("$trueCount shared mailboxes have sign-in allowed: $SignInAllowedUsersList")
+} else {
+    $Report3.Add("No shared mailboxes have sign-in allowed.")
+}
 
-# Display the report
-# Format the report as a table for better readability.
-$Report3 | Format-Table -AutoSize
+if ($falseCount -gt 0) {
+    $Report3.Add("$falseCount shared mailboxes have sign-in disabled.")
+} else {
+    $Report3.Add("No shared mailboxes have sign-in disabled.")
+}
 
 # Save the report to a text file
-# Format the report entries for better readability.
-$FormattedReport3 = $Report3 | ForEach-Object {
-    if ($_ -is [PSCustomObject]) {
-        "DisplayName: $_.DisplayName`nUserPrincipalName: $_.UserPrincipalName`nAccountEnabled: $_.AccountEnabled`nSignInAllowed: $_.SignInAllowed`n"
-    } else {
-        $_
-    }
-}
 # Join the formatted report entries into a single string and save it to a text file.
-$FormattedReport3 -join "`n" | Add-Content -Path $reportFile
+$Report3 -join "`n" | Add-Content -Path "C:\Reports\Defender.txt"
 
-# Control 2.2.13: Ensure the connection filter safe list is off.
+# Control 2.1.13: Ensure the connection filter safe list is off.
 
 #  Initialize the report for 2.2.13
 # Create a new list to store the report data for this control.
@@ -307,11 +305,8 @@ $Report4 = [System.Collections.Generic.List[Object]]::new()
 #  Add control message to the report
 
 # Add a message specifying the control being implemented.
-$Control4 = "Control: 2.2.13 Ensure the connection filter safe list is off."
+$Control4 = "Control: 2.1.13 Ensure the connection filter safe list is off."
 $Report4.Add($Control4)
-
-# Connect to Exchange Online to retrieve the Hosted Connection Filter Policy.
-Connect-ExchangeOnline
 
 #  Run the following PowerShell command to get the Hosted Connection Filter Policy
 # Retrieve the Hosted Connection Filter Policy for the default identity and format the output to list the EnableSafeList property.
@@ -320,113 +315,95 @@ $FilterPolicy = Get-HostedConnectionFilterPolicy -Identity Default | Format-List
 #  Ensure EnableSafeList is False
 # Check if the EnableSafeList property is set to False and add the result to the report.
 if ($FilterPolicy.EnableSafeList -eq $false) {
-    $Report4.Add("EnableSafeList is False")
+    $Report4.Add("EnableSafeList is False, Control Passed.")
 } else {
-    $Report4.Add("EnableSafeList is not False")
+    $Report4.Add("EnableSafeList is not False, Control Failed.")
 }
 
-#  Save the updated report to the text file
-# Format the report entries for better readability.
-$FormattedReport4 = $Report4 | ForEach-Object {
-    if ($_ -is [PSCustomObject]) {
-        "Control: 2.2.13 Ensure the connection filter safe list is off.`nEnableSafeList: $_"
-    } else {
-        $_
-    }
-}
-#  Join the formatted report entries into a single string and append it to the text file.
-$FormattedReport4 -join "`n" | Add-Content -Path $reportFile
+#Append append it to the text file.
+$Report4 -join "`n" | Add-Content -Path $reportFile
 
-# Control 2.2.14: Ensure inbound anti-spam policies do not contain allowed domains.
+# Control 2.1.14: Ensure inbound anti-spam policies do not contain allowed domains.
 
-#  Initialize the report 
+# Initialize the report
 # Create a new list to store the report data for this control.
 $Report5 = [System.Collections.Generic.List[Object]]::new()
 
-#  Add control message to the report
-
-# Add a message specifying the control being implemented.
-$Control5 = "Control: 2.2.14 Ensure inbound anti-spam policies do not contain allowed domains."
+# Add control message to the report
+$Control5 = "Control: 2.1.14 Ensure inbound anti-spam policies do not contain allowed domains."
 $Report5.Add($Control5)
 
-#  Connect to Exchange Online
-# Connect to Exchange Online to retrieve the Hosted Content Filter Policy.
-Connect-ExchangeOnline
+# Retrieve all inbound anti-spam policies
+$AntiSpamPolicies = Get-HostedContentFilterPolicy
 
-#  Run the following PowerShell command to get the Hosted Content Filter Policy
-# Retrieve the Hosted Content Filter Policy and format the output to list the Identity and AllowedSenderDomains properties.
-$ContentFilterPolicies = Get-HostedContentFilterPolicy | Select-Object Identity, AllowedSenderDomains
+# Initialize lists to store policies based on allowed sender domains status
+$DefinedPolicies = @()
+$UndefinedPolicies = @()
 
-#  Ensure AllowedSenderDomains is undefined for each inbound policy
-# Loop through each policy and check if AllowedSenderDomains is undefined.
-$ContentFilterPolicies | ForEach-Object {
-    $PolicyStatus = if ($_.AllowedSenderDomains -eq $null -or $_.AllowedSenderDomains.Count -eq 0) {
-        "AllowedSenderDomains is undefined"
+# Loop through each anti-spam policy and check for allowed sender domains
+foreach ($Policy in $AntiSpamPolicies) {
+    $AllowedSenderDomains = $Policy.AllowedSenderDomains -join ", "
+    $Status = if ($AllowedSenderDomains) { "AllowedSenderDomains is defined" } else { "AllowedSenderDomains is undefined" }
+
+    # Add the policy details to the appropriate list
+    if ($AllowedSenderDomains) {
+        $DefinedPolicies += $Policy.Identity
     } else {
-        "AllowedSenderDomains is defined"
-    }
-    # Add the policy details and status to the report.
-    $Report5.Add([PSCustomObject]@{
-        Identity = $_.Identity
-        AllowedSenderDomains = $_.AllowedSenderDomains -join ", "
-        Status = $PolicyStatus
-    })
-}
-
-#  Save the report to a text file
-# Format the report entries for better readability.
-$FormattedReport5 = $Report5 | ForEach-Object {
-    if ($_ -is [PSCustomObject]) {
-        "Identity: $_.Identity`nAllowedSenderDomains: $_.AllowedSenderDomains`nStatus: $_.Status`n"
-    } else {
-        $_
+        $UndefinedPolicies += $Policy.Identity
     }
 }
-#  Join the formatted report entries into a single string and save it to a text file.
-$FormattedReport5 -join "`n" | Add-Content -Path $reportFile
+
+# Add the summary to the report
+if ($UndefinedPolicies.Count -gt 0) {
+    $UndefinedPoliciesList = $UndefinedPolicies -join ", "
+    $Report5.Add("The following domains inbound anti-spam policies are undefined: $UndefinedPoliciesList. Domains pass.")
+} else {
+    $Report5.Add("No inbound anti-spam policies are undefined. All domains pass.")
+}
+
+if ($DefinedPolicies.Count -gt 0) {
+    $DefinedPoliciesList = $DefinedPolicies -join ", "
+    $Report5.Add("The following domains inbound anti-spam policies are defined: $DefinedPoliciesList. Domains failed.")
+} else {
+    $Report5.Add("No inbound anti-spam policies are defined. All domains pass.")
+}
+
+# Save the report to a text file
+# Join the formatted report entries into a single string and save it to a text file.
+$Report5 -join "`n" | Add-Content -Path "C:\Reports\Defender.txt"
 
 # Control 6.5.1: Ensure Modern Authentication for Exchange Online is enabled
-#  Initialize the report 
+
+# Initialize the report for 6.5.1
 # Create a new list to store the report data for this control.
 $Report6 = [System.Collections.Generic.List[Object]]::new()
 
-#  Add control message to the report
-
-# Add a message specifying the control being implemented.
+# Add control message to the report
 $Control6 = "Control 6.5.1: Ensure Modern Authentication for Exchange Online is enabled."
 $Report6.Add($Control6)
 
-#  Run the following Powershell command:
-$Auth = Get-OrganizationConfig | Select-Object Name, OAuth*
+# Run the following PowerShell command:
+$Auth = Get-OrganizationConfig | Select-Object Name, OAuth2ClientProfileEnabled
 
-#  Add the authentication configuration details to the report
-$FormattedReport6 = [System.Collections.Generic.List[Object]]::new()
-$FormattedReport6.Add("Modern Authentication Configuration:")
-$FailedCount = 0
-$NonCompliantAccounts = [System.Collections.Generic.List[Object]]::new()
-$Auth | ForEach-Object {
-    $Report6.Add("Name: $($_.Name), OAuth: $($_.OAuth)")
-    if ($_.OAuth -eq $false) {
-        $FailedCount++
-        $NonCompliantAccounts.Add($_.Name)
-    }
+# Count the number of accounts with and without OAuth enabled
+$PassCount = ($Auth | Where-Object { $_.OAuth2ClientProfileEnabled -eq $true }).Count
+$FailCount = ($Auth | Where-Object { $_.OAuth2ClientProfileEnabled -eq $false }).Count
+
+# List the accounts that do not have OAuth enabled
+$FailedAccounts = $Auth | Where-Object { $_.OAuth2ClientProfileEnabled -eq $false } | Select-Object -ExpandProperty Name
+
+# Add the authentication configuration details to the report
+$Report6.Add("$PassCount accounts have modern authentication enabled.")
+if ($FailCount -gt 0) {
+    $FailedAccountsList = $FailedAccounts -join ", "
+    $Report6.Add("$FailCount accounts do not have modern authentication enabled. Please enable it on the following accounts: $FailedAccountsList")
+} else {
+    $Report6.Add("All accounts have modern authentication enabled.")
 }
 
-# Add the summary of failed accounts to the report
-$SummaryCount = "Total number of accounts with OAuth disabled: $FailedCount"
-$Report6.Add($SummaryCount)
-$FormattedReport6.Add($SummaryCount)
-
-# Add the list of noncompliant accounts to the report
-if ($FailedCount -gt 0) {
-    $NonCompliantSummary = "Accounts noncompliant: " + ($NonCompliantAccounts -join ", ")
-    $Report6.Add($NonCompliantSummary)
-    $FormattedReport6.Add($NonCompliantSummary)
-}
-
-#  Join the formatted report entries into a single string and save it to a text file.
-
-$FormattedReport6 -join "`n" | Add-Content -Path $reportFile
+# Save the report to a text file
+# Join the formatted report entries into a single string and save it to a text file.
+$Report6 -join "`n" | Add-Content -Path "C:\Reports\Defender.txt"
 
 # Control 7.2.2: Ensure SharePoint and OneDrive integration with Azure AD B2B is enabled.
 #  Initialize the report 
@@ -479,31 +456,35 @@ $Report8.Add($output)
 $Report8 -join "`n" | Add-Content -Path $reportFile
 
 # Control 7.2.7: Ensure link sharing is restricted in SharePoint and OneDrive.
-#  Initialize the report 
+
+# Initialize the report
 # Create a new list to store the report data for this control.
 $Report9 = [System.Collections.Generic.List[Object]]::new()
 
-#  Add control message to the report
+# Add control message to the report
 # Add a message specifying the control being implemented.
 $Control9 = "7.2.7: Ensure link sharing is restricted in SharePoint and OneDrive."
 $Report9.Add($Control9)
 
-#  Run the following Powershell Command
-$LinkSharking = Get-SPOTenant | Format-List DefaultSharingLinkType
-if ($LinkSharking -eq "Direct") {
+# Run the following PowerShell Command
+$LinkSharing = Get-SPOTenant | Select-Object -ExpandProperty DefaultSharingLinkType
+if ($LinkSharing -eq "Direct") {
     $output = "Link sharing is restricted. Control passed."
-}
-else {
+} else {
     $output = "Link sharing is not restricted. Control failed."
 }
-Report9.Add($LinkSharking)
-Report9.Add($output)
+$Report9.Add("DefaultSharingLinkType: $LinkSharing")
+$Report9.Add($output)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report9 -join "`n" | Add-Content -Path $reportFile
+# Convert the report entries to strings
+$FormattedReport9 = $Report9 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport9 -join "`n" | Add-Content -Path $reportFile
 
 # Control 7.2.9: Ensure guest access to a site or OneDrive will expire automatically.
-#  Initialize the report 
+
+# Initialize the report
 # Create a new list to store the report data for this control.
 $Report10 = [System.Collections.Generic.List[Object]]::new()
 
@@ -511,30 +492,36 @@ $Report10 = [System.Collections.Generic.List[Object]]::new()
 $Control10 = "7.2.9: Ensure guest access to a site or OneDrive will expire automatically."
 $Report10.Add($Control10)
 
-#  Run the following Powershell Command
-$UserExpire = Get-SPOTenant | Format-List ExternalUserExpirationRequired
-$DaysExpire = Get-SPOTenant | Format-List ExternalUserExpireInDays
-if ($UserExpire -eq "True") {
+# Run the following PowerShell Command
+$SPOTenant = Get-SPOTenant
+$UserExpire = $SPOTenant.ExternalUserExpirationRequired
+$DaysExpire = [int]$SPOTenant.ExternalUserExpireInDays
+
+if ($UserExpire -eq $true) {
     $output = "Guest access will expire automatically. Control passed."
-}
-else {
+} else {
     $output = "Guest access will not expire automatically. Control failed."
 }
-if ($DaysExpire -le "30") {
-    $output2 = "Guest access will expire in 30 days. Control passed."
-}
-else {
+
+if ($DaysExpire -le 30) {
+    $output2 = "Guest access will expire in 30 or less days. Control passed."
+} else {
     $output2 = "Guest access will not expire in 30 days. Control failed."
 }
-$Report10.Add($UserExpire)
-$Report10.Add($DaysExpire)
+
+$Report10.Add("ExternalUserExpirationRequired: $UserExpire")
+$Report10.Add("ExternalUserExpireInDays: $DaysExpire")
 $Report10.Add($output)
 $Report10.Add($output2)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report10 -join "`n" | Add-Content -Path $reportFile
+# Convert the report entries to strings
+$FormattedReport10 = $Report10 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport10 -join "`n" | Add-Content -Path $reportFile
 
 # Control 7.2.11: Ensure the SharePoint default sharing link permission is set.
+
 # Create a new list to store the report data for this control.
 $Report11 = [System.Collections.Generic.List[Object]]::new()
 
@@ -542,19 +529,24 @@ $Report11 = [System.Collections.Generic.List[Object]]::new()
 $Control11 = "7.2.11: Ensure the SharePoint default sharing link permission is set."
 $Report11.Add($Control11)
 
-#  Run the following Powershell Command
-$LinkPermission = Get-SPOTenant | Format-List DefaultLinkPermission
+# Run the following PowerShell Command
+$SPOTenant = Get-SPOTenant
+$LinkPermission = $SPOTenant.DefaultLinkPermission
+
 if ($LinkPermission -eq "View") {
     $output = "Default sharing link permission is set to View. Control passed."
-}
-else {
+} else {
     $output = "Default sharing link permission is not set to View. Control failed."
 }
-$Report11.Add($LinkPermission)
+
+$Report11.Add("DefaultLinkPermission: $LinkPermission")
 $Report11.Add($output)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report11 -join "`n" | Add-Content -Path $reportFile
+# Convert the report entries to strings
+$FormattedReport11 = $Report11 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport11 -join "`n" | Add-Content -Path $reportFile
 
 # Control 7.3.1: Ensure Office 365 SharePoint infected files are disallowed for download. 
 # Create a new list to store the report data for this control.
@@ -574,8 +566,8 @@ if ($InfectFiles.DisallowInfectedFileDownload -eq $true) {
 else {
     $output = "Infected files are allowed for download. Control failed."
 }
-Report12.Add($InfectFiles)
-Report12.Add($output)
+$Report12.Add($InfectFiles)
+$Report12.Add($output)
 
 #  Join the formatted report entries into a single string and save it to a text file.
 $Report12 -join "`n" | Add-Content -Path $reportFile
@@ -596,7 +588,10 @@ $ApprovedServicesString = $ApprovedServices | Out-String
 
 # Append the control message and the output to the text file
 $Report13.Add($ApprovedServicesString)
-$Report13 -join "`n" | Add-Content -Path $reportFile
+$Report13.Add("Check these in discovery session to ensure compliance.")
+$FormattedReport13 = $Report13 | ForEach-Object { $_.ToString() }
+$FormattedReport13 -join "`n" | Add-Content -Path $reportFile
+
 
 # Control 8.1.2: Ensure users can't send emails to a channel email address.
 # Create a new list to store the report data for this control.
@@ -614,11 +609,12 @@ if ($ChannelAddress.AllowEmailIntoChannel -eq $false) {
 else {
     $output = "Users can send emails to a channel email address. Control failed."
 }
-Report14.Add($ChannelAddress)
-Report14.Add($output)
+$Report14.Add("AllowEmailIntoChannel:$ChannelAddress")
+$Report14.Add($output)
+$FormattedReport14 = $Report14 | ForEach-Object { $_.ToString() }
 
 #  Join the formatted report entries into a single string and save it to a text file.
-$Report14 -join "`n" | Add-Content -Path $reportFile
+$FormattedReport14 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.2.1: Ensure external domains are restricted in the Teams admin center.
 # Create a new list to store the report data for this control.
@@ -648,7 +644,7 @@ $Report15.Add($output)
 # Join the formatted report entries into a single string and save it to a text file.
 $Report15 -join "`n" | Add-Content -Path $reportFile
 
-# Control 8.2.2: Ensure communication with unmanaged Teams users is disabled. 
+# Control 8.2.2: Ensure communication with unmanaged Teams users is disabled.
 # Create a new list to store the report data for this control.
 $Report16 = [System.Collections.Generic.List[Object]]::new()
 
@@ -656,19 +652,23 @@ $Report16 = [System.Collections.Generic.List[Object]]::new()
 $Control16 = "8.2.2: Ensure communication with unmanaged Teams users is disabled."
 $Report16.Add($Control16)
 
-#  Run the following PowerShell Command
-$TeamsComms = Get-CsTenantFederationConfiguration | Format-List AllowTeamsConsumer 
-if ($TeamsComms.AllowTeamsConsumer -eq $false) {
+# Run the following PowerShell Command
+$TeamsComms = Get-CsTenantFederationConfiguration | Select-Object -ExpandProperty AllowTeamsConsumer
+
+if ($TeamsComms -eq $false) {
     $output = "Communication with unmanaged Teams users is disabled. Control passed."
-}
-else {
+} else {
     $output = "Communication with unmanaged Teams users is enabled. Control failed."
 }
-Report16.Add($TeamsComms)
-Report16.Add($output)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report16 -join "`n" | Add-Content -Path $reportFile
+$Report16.Add("AllowTeamsConsumer: $TeamsComms")
+$Report16.Add($output)
+
+# Convert the report entries to strings
+$FormattedReport16 = $Report16 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport16 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.2.3: Ensure external Teams users cannot initiate conversations.
 # Create a new list to store the report data for this control.
@@ -678,19 +678,23 @@ $Report17 = [System.Collections.Generic.List[Object]]::new()
 $Control17 = "8.2.3: Ensure external Teams users cannot initiate conversations."
 $Report17.Add($Control17)
 
-#  Run the following PowerShell Command
-$Inbound = Get-CsTenantFederationConfiguration | Format-List AllowTeamsConsumerInbound 
-if ($Inbound.AllowTeamsConsumerInbound -eq $false) {
+# Run the following PowerShell Command
+$Inbound = Get-CsTenantFederationConfiguration | Select-Object -ExpandProperty AllowTeamsConsumerInbound
+
+if ($Inbound -eq $false) {
     $output = "External Teams users cannot initiate conversations. Control passed."
-}
-else {
+} else {
     $output = "External Teams users can initiate conversations. Control failed."
 }
-Report17.Add($Inbound)
-Report17.Add($output)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report17 -join "`n" | Add-Content -Path $reportFile
+$Report17.Add("AllowTeamsConsumerInbound: $Inbound")
+$Report17.Add($output)
+
+# Convert the report entries to strings
+$FormattedReport17 = $Report17 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport17 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.5.1: Ensure anonymous users can't join a meeting.
 # Create a new list to store the report data for this control.
@@ -708,11 +712,12 @@ if ($Anonjoin.AllowAnonymousUsersToJoinMeeting -eq $false) {
 else {
     $output = "Anonymous users can join a meeting. Control failed."
 }
-Report18.Add($Anonjoin)
-Report18.Add($output)
+$Report18.Add("AllowAnonymousUsersToJoinMeeting: $Anonjoin")
+$Report18.Add($output)
 
+$FormattedReport18 = $Report18 | ForEach-Object { $_.ToString() }
 #  Join the formatted report entries into a single string and save it to a text file.
-$Report18 -join "`n" | Add-Content -Path $reportFile
+$FormattedReport18 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.5.2: Ensure anonymous users and dial-in callers can't start a meeting.
 # Create a new list to store the report data for this control.
@@ -723,18 +728,26 @@ $Control19 = "8.5.2: Ensure anonymous users and dial-in callers can't start a me
 $Report19.Add($Control19)
 
 # Run the following PowerShell Command
-$AnonDialer = Get-CsTeamsMeetingPolicy -Identity Global | Format-List AllowAnonymousUsersToStartMeeting 
-if ($AnonDialer.AllowAnonymousUsersToStartMeeting -eq $false) {
+$MeetingPolicy = Get-CsTeamsMeetingPolicy -Identity Global | Select-Object AllowAnonymousUsersToStartMeeting, AllowDialInUsersToStartMeeting
+
+$AnonDialer = $MeetingPolicy.AllowAnonymousUsersToStartMeeting
+$DialInUsers = $MeetingPolicy.AllowDialInUsersToStartMeeting
+
+if ($AnonDialer -eq $false -and $DialInUsers -eq $false) {
     $output = "Anonymous users and dial-in callers can't start a meeting. Control passed."
-}
-else {
+} else {
     $output = "Anonymous users and dial-in callers can start a meeting. Control failed."
 }
-Report19.Add($AnonDialer)
-Report19.Add($output)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report19 -join "`n" | Add-Content -Path $reportFile
+$Report19.Add("AllowAnonymousUsersToStartMeeting: $AnonDialer")
+$Report19.Add("AllowDialInUsersToStartMeeting: $DialInUsers")
+$Report19.Add($output)
+
+# Convert the report entries to strings
+$FormattedReport19 = $Report19 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport19 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.5.3: Ensure only people in my org can bypass the lobby.
 # Create a new list to store the report data for this control.
@@ -752,11 +765,13 @@ if ($LobBypass.AutoAdmittedUsers -eq "EveryoneInCompanyExcludingGuests") {
 else {
     $output = "People outside my org can bypass the lobby. Control failed."
 }
-Report20.Add($LobBypass)
-Report20.Add($output)
+$Report20.Add("AutoAdmittedUsers: $LobBypass")
+$Report20.Add($output)
+
+$FormattedReport20 = $Report20 | ForEach-Object { $_.ToString() }
 
 #  Join the formatted report entries into a single string and save it to a text file.
-$Report20 -join "`n" | Add-Content -Path $reportFile
+$FormattedReport20 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.5.5: Ensure meeting chat does not allow anonymous users.
 # Create a new list to store the report data for this control.
@@ -767,18 +782,22 @@ $Control21 = "8.5.5: Ensure meeting chat does not allow anonymous users."
 $Report21.Add($Control21)
 
 # Run the following PowerShell Command
-$BlockAnon = Get-CsTeamsMeetingPolicy -Identity Global | Format-List MeetingChatEnabledType
-if ($BlockAnon.MeetingChatEnabledType -eq "DisabledForAnonymousUsers" -or $BlockAnon.MeetingChatEnabledType -eq "EnabledExceptAnonymous") {
+$BlockAnon = Get-CsTeamsMeetingPolicy -Identity Global | Select-Object -ExpandProperty MeetingChatEnabledType
+
+if ($BlockAnon -eq "DisabledForAnonymousUsers" -or $BlockAnon -eq "EnabledExceptAnonymous") {
     $output = "Meeting chat does not allow anonymous users. Control passed."
-}
-else {
+} else {
     $output = "Meeting chat allows anonymous users. Control failed."
 }
-$Report21.Add($BlockAnon)
+
+$Report21.Add("MeetingChatEnabledType: $BlockAnon")
 $Report21.Add($output)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report21 -join "`n" | Add-Content -Path $reportFile
+# Convert the report entries to strings
+$FormattedReport21 = $Report21 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport21 -join "`n" | Add-Content -Path $reportFile
 
 #Control 8.5.6: Ensure only organizers and co-organizers can present.
 # Create a new list to store the report data for this control.
@@ -796,11 +815,12 @@ if ($CoOrg.DesignatedPresenterRoleMode -eq "OrganizerOnly" -or $CoOrg.Designated
 else {
     $output = "Other participants can present. Control failed."
 }
-$Report22.Add($CoOrg)
+$Report22.Add("DesignatedPresenterRoleMode: $CoOrg")
 $Report22.Add($output)
 
+$FormattedReport22 = $Report22 | ForEach-Object { $_.ToString() }
 #  Join the formatted report entries into a single string and save it to a text file.
-$Report22 -join "`n" | Add-Content -Path $reportFile
+$FormattedReport22 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.5.8: Ensure external meeting chat is off.
 # Create a new list to store the report data for this control.
@@ -818,11 +838,12 @@ if ($ExMeet.AllowExternalNonTrustedMeetingChat -eq $false) {
 else {
     $output = "External meeting chat is on. Control failed."
 }
-$Report23.Add($ExMeet)
+$Report23.Add("AllowExternalNonTrustedMeetingChat: $ExMeet")
 $Report23.Add($output)
 
+$FormattedReport23 = $Report23 | ForEach-Object { $_.ToString() }
 #  Join the formatted report entries into a single string and save it to a text file.
-$Report23 -join "`n" | Add-Content -Path $reportFile
+$FormattedReport23 -join "`n" | Add-Content -Path $reportFile
 
 # Control 8.6.1: Ensure users can report security concerns in Teams.
 # Create a new list to store the report data for this control.
@@ -832,11 +853,13 @@ $Report24 = [System.Collections.Generic.List[Object]]::new()
 $Control24 = "Control 8.6.1: Ensure users can report security concerns in Teams."
 $Report24.Add($Control24)
 
-# Run the following PowerShell Command
-$Teams =  Get-CsTeamsMessagingPolicy -Identity Global | Format-List AllowSecurityEndUserReporting
-$Defender = Get-ReportSubmissionPolicy | Format-List Report*
+# Run the following PowerShell Commands
+$Teams = Get-CsTeamsMessagingPolicy -Identity Global | Select-Object -ExpandProperty AllowSecurityEndUserReporting
+$Defender = Get-ReportSubmissionPolicy | Select-Object ReportJunkToCustomizedAddress, ReportNotJunkToCustomizedAddress, ReportPhishToCustomizedAddress, ReportJunkAddresses, ReportNotJunkAddresses, ReportPhishAddresses, ReportChatMessageEnabled, ReportChatMessageToCustomizedAddressEnabled
+
 $SOCAddress = Read-Host -Prompt "Please enter the SOC email address/Custom Email Address Reported Emails get sent to: "
-if ($Teams.AllowSecurityEndUserReporting -eq $true -and 
+
+if ($Teams -eq $true -and 
     $Defender.ReportJunkToCustomizedAddress -eq $true -and 
     $Defender.ReportNotJunkToCustomizedAddress -eq $true -and 
     $Defender.ReportPhishToCustomizedAddress -eq $true -and 
@@ -846,16 +869,26 @@ if ($Teams.AllowSecurityEndUserReporting -eq $true -and
     $Defender.ReportChatMessageEnabled -eq $false -and 
     $Defender.ReportChatMessageToCustomizedAddressEnabled -eq $true) {
     $output = "Users can report security concerns in Teams. Control passed."
-}
-else {
+} else {
     $output = "Users cannot report security concerns in Teams. Control failed."
 }
-$Report24.Add($Teams)
-$Report24.Add($Defender)
+
+$Report24.Add("AllowSecurityEndUserReporting: $Teams")
+$Report24.Add("ReportJunkToCustomizedAddress: $($Defender.ReportJunkToCustomizedAddress)")
+$Report24.Add("ReportNotJunkToCustomizedAddress: $($Defender.ReportNotJunkToCustomizedAddress)")
+$Report24.Add("ReportPhishToCustomizedAddress: $($Defender.ReportPhishToCustomizedAddress)")
+$Report24.Add("ReportJunkAddresses: $($Defender.ReportJunkAddresses -join ', ')")
+$Report24.Add("ReportNotJunkAddresses: $($Defender.ReportNotJunkAddresses -join ', ')")
+$Report24.Add("ReportPhishAddresses: $($Defender.ReportPhishAddresses -join ', ')")
+$Report24.Add("ReportChatMessageEnabled: $($Defender.ReportChatMessageEnabled)")
+$Report24.Add("ReportChatMessageToCustomizedAddressEnabled: $($Defender.ReportChatMessageToCustomizedAddressEnabled)")
 $Report24.Add($output)
 
-#  Join the formatted report entries into a single string and save it to a text file.
-$Report24 -join "`n" | Add-Content -Path $reportFile
+# Convert the report entries to strings
+$FormattedReport24 = $Report24 | ForEach-Object { $_.ToString() }
+
+# Join the formatted report entries into a single string and save it to a text file.
+$FormattedReport24 -join "`n" | Add-Content -Path $reportFile
 
 # Cleanup Process
 # ----------------
@@ -864,3 +897,28 @@ $env:PSModulePath = $env:PSModulePath -replace [regex]::Escape($customModulePath
 
 # Deletes the customModulePath directories and modules from the client Environment. Finished the cleanup process.
 Remove-Item -Path $customModulePath -Recurse -Force
+
+$ExecutionContext.SessionState.MaxFunctionCount = $originalLimit
+
+# Unloads the Assembly (Free Up Memory)
+Write-Host "Unloading the assembly..."
+[System.GC]::Collect()  # Force garbage collection
+[System.GC]::WaitForPendingFinalizers()
+
+# Unregisters NuGet Source (If It Was Added)
+if ($addedNuGetSource) {
+    Write-Host "Removing temporary NuGet source: $nugetSource"
+    & "$nugetExe" sources remove -Name "nuget.org"
+}
+
+# Cleansup (Remove NuGet CLI if it was downloaded in this session)
+if (-Not $NuGetExists) {
+    Write-Host "Cleaning up: Removing temporary NuGet CLI..."
+    Remove-Item -Path $nugetExe -Force -ErrorAction SilentlyContinue
+}
+
+# Cleanups the Downloaded Package Files
+Write-Host "Cleaning up: Removing temporary package files..."
+Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host "Script execution complete."
