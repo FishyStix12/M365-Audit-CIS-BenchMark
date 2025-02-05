@@ -17,7 +17,7 @@ $nugetSource = "https://api.nuget.org/v3/index.json"  # NuGet package repository
 $packageName = "Microsoft.Extensions.Logging.Abstractions"  # The package we want to install
 $packageVersion = "1.1.2"  # The specific version we need
 $tempDir = "$env:TEMP\LoggingAbstractions"  # Temporary directory for storing the package
-$originalLimit = $ExecutionContext.SessionState.MaxFunctionCount
+$originalLimit = $ExecutionContext.SessionState.MaxFunctionCount # Saves the clients default function limit
 $NuGetExists = $false
 $globalNuGet = Get-Command nuget -ErrorAction SilentlyContinue  # Check if NuGet is available globally
 $existingSources = & "$nugetExe" sources list  # List registered package sources
@@ -26,19 +26,13 @@ $dllPath = Get-ChildItem -Path "$tempDir" -Recurse -Filter "$packageName.dll" | 
 $customModulePath = ".\powershell\modules" # Define the custom module path
 $outputPath = "C:\Reports"
 $reportFile = Join-Path -Path $outputPath -ChildPath "M365AdminCenter.txt"
-$ExecutionContext.SessionState.Applications.MaximumFunctionCount = 40000
 
-# ===========================================
-# PowerShell Script: Temporary NuGet Package Installation
-# This script:
-# 1. Checks if NuGet CLI is installed, downloads it if missing.
-# 2. Ensures the NuGet package source is registered.
-# 3. Installs the required NuGet package (Microsoft.Extensions.Logging.Abstractions v1.1.2).
-# 4. Loads the installed package dynamically.
-# 5. Cleans up temporary files and NuGet CLI after execution.
-# ===========================================
+#################################################################################################
+# Setting up the script environment:
+#################################################################################################
+$ExecutionContext.SessionState.Applications.MaximumFunctionCount = 40000 # Set the function limit to 40000
 
-
+# Step 1: Check if NuGet CLI is available
 if ($globalNuGet) {
     $NuGetExists = $true
     Write-Host "NuGet CLI is already installed: $($globalNuGet.Source)"
@@ -50,7 +44,7 @@ if ($globalNuGet) {
     Invoke-WebRequest -Uri $nugetUrl -OutFile $nugetExe  # Download NuGet CLI if missing
 }
 
-# Step 3: Verify NuGet CLI Execution
+# Step 2: Verify NuGet CLI Execution
 if (Test-Path $nugetExe) {
     Write-Host "NuGet Version Check:"
     & "$nugetExe" help | Select-String "NuGet Version"  # Verify that NuGet CLI is working
@@ -59,7 +53,7 @@ if (Test-Path $nugetExe) {
     exit 1  # Exit the script if NuGet CLI is not found
 }
 
-# Step 4: Ensure NuGet Source is Available
+# Step 3: Ensure NuGet Source is Available
 Write-Host "Checking NuGet sources..."
 if ($existingSources -notmatch [regex]::Escape($nugetSource)) {
     Write-Host "Adding NuGet source: $nugetSource"
@@ -308,7 +302,10 @@ $tenantURL = # Enter the Client's SharePoint Tenant URL.
 $domains = @("example.com", "example2.com")  # Replace with actual domains
 $SOCAddress = # Please enter the Client's SOC email address/Custom Email Address Reported Emails get sent to:
 #################################################################################################
-# Script:
+
+#################################################################################################
+# Script Begins Here:
+#################################################################################################
 # Retrieve detailed information for privileged users
 if (-not (Get-Module -Name Az)) { Write-Error "Az module not imported" }
 if (-not (Get-Module -Name PnP.PowerShell)) { Write-Error "PnP.PowerShell module not imported" }
