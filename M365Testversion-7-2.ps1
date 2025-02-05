@@ -1,6 +1,6 @@
 #################################################################################################
 # Author: Nicholas Fisher
-# Date: January 23 2025
+# Date: February 4 2025
 # Description of Script
 # The provided PowerShell script is designed to support auditing and management of Microsoft 365
 # environments based on Version 4.0 of the CIS M365 Benchmark. It defines a custom module path
@@ -145,7 +145,7 @@ Connect-AzureAD
 Connect-MicrosoftTeams
 
 Connect-AzureAD 
-
+Connect-IPPSSession
 Connect-SPOservice
 
 # Connect to SharePoint Online
@@ -221,6 +221,7 @@ $CoOrg = Get-CsTeamsMeetingPolicy -Identity Global | Format-List DesignatedPrese
 $ExMeet = Get-CsTeamsMeetingPolicy -Identity Global | Format-List AllowExternalNonTrustedMeetingChat # Get the external meeting chat setting
 $Teams = Get-CsTeamsMessagingPolicy -Identity Global | Select-Object -ExpandProperty AllowSecurityEndUserReporting # Get the security end-user reporting setting
 $Defender = Get-ReportSubmissionPolicy | Select-Object ReportJunkToCustomizedAddress, ReportNotJunkToCustomizedAddress, ReportPhishToCustomizedAddress, ReportJunkAddresses, ReportNotJunkAddresses, ReportPhishAddresses, ReportChatMessageEnabled, ReportChatMessageToCustomizedAddressEnabled # Get the Defender settings
+$DlpPolicy = Get-DlpCompliancePolicy $DlpPolicy | Where-Object {$_.Workload -match "Teams"} | Format-Table Name,Mode,TeamsLocation* # Get the DLP policy for Teams
 
 #################################################################################################
 # Initialize the report and formated reports:
@@ -266,6 +267,8 @@ $Report24 = [System.Collections.Generic.List[Object]]::new()
 $FormattedReport24 = $Report24 | ForEach-Object { $_.ToString() }
 $Report25 = [System.Collections.Generic.List[Object]]::new()
 $FormattedReport25 = $Report25 | ForEach-Object { $_.ToString() }
+$Report26 = [System.Collections.Generic.List[Object]]::new()
+$FormattedReport26 = $Report26 | ForEach-Object { $_.ToString() }
 
 #################################################################################################
 # Controls:
@@ -295,6 +298,7 @@ $Control22 = "8.5.6: Ensure only organizers and co-organizers can present."
 $Control23 = "8.5.8: Ensure external meeting chat is off."
 $Control24 = "Control 8.6.1: Ensure users can report security concerns in Teams."
 $Control25 = "Control: 2.1.10 Ensure DMARC Records for all Exchange Online domains are published."
+$Control26 = "Control 3.2.2: Ensure DLP policies are enabled for Microsoft Teams."
 
 #################################################################################################
 # Edit Variables Below for each new client:
@@ -458,6 +462,14 @@ if ($DefinedPolicies.Count -gt 0) {
 # Save the report to a text file
 # Join the formatted report entries into a single string and save it to a text file.
 $Report5 -join "`n" | Add-Content -Path "C:\Reports\Defender.txt"
+
+# Control 3.2.2: Ensure DLP policies are enabled for Microsoft Teams 
+$Report26.Add($Control26)
+$Report26.Add($DlpPolicy)
+$Report26.Add("Review Guidelines on how to assess in work program.")
+
+$FormattedReport26 -join "`n" | Add-Content -Path $reportFile
+
 
 # Control 6.5.1: Ensure Modern Authentication for Exchange Online is enabled
 $Report6.Add($Control6)
@@ -800,9 +812,6 @@ if (-Not $NuGetExists) {
 
 # Cleanups the Downloaded Package Files
 Write-Host "Cleaning up: Removing temporary package files..."
-Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-
-Write-Host "Script execution complete."
 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Script execution complete."
