@@ -303,6 +303,7 @@ $domains = @("example.com", "example2.com")  # Replace with actual domains
 $SOCAddress = # Please enter the Client's SOC email address/Custom Email Address Reported Emails get sent to:
 #################################################################################################
 
+
 #################################################################################################
 # Script Begins Here:
 #################################################################################################
@@ -366,7 +367,7 @@ $MBX | ForEach-Object {
     # Get user details for the shared mailbox using its ExternalDirectoryObjectId.
     $user = Get-MsolUser -ObjectId $_.ExternalDirectoryObjectId
     # Determine if sign-in is allowed based on the AccountEnabled property.
-    if ($user.AccountEnabled) {
+    if ($user.AccountEnabled -eq $true) {
         $SignInAllowedUsers += $user.UserPrincipalName
     } else {
         $SignInBlockedUsers += $user.UserPrincipalName
