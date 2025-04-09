@@ -167,9 +167,13 @@ if ($ineligibleHybridJoin.Count -gt 0) {
 }
 
 # === Export: All Windows Devices ===
-$allWindowsDevices = $allComputers | Select-Object Name, OperatingSystem
+$allWindowsDevices = $allComputers | Where-Object {
+    $_.OperatingSystem -match "Windows"
+} | Select-Object Name, OperatingSystem
 
-if ($allWindowsDevices.Count -gt 0) {
+$totalWindowsDeviceCount = $allWindowsDevices.Count
+
+if ($totalWindowsDeviceCount -gt 0) {
     $allWindowsDevices | Export-Excel -Path "$outputFolder\AllWindowsDevices.xlsx" -AutoSize
     Write-Host "Exported list of all Windows devices to AllWindowsDevices.xlsx" -ForegroundColor Cyan
 } else {
@@ -182,7 +186,7 @@ Write-Host "Total Windows AD Computers: $($allComputerNames.Count)"
 Write-Host "Total Computers in Device-Only Groups: $($groupedComputers.Count)"
 Write-Host "Computers NOT in Any Device-Only Group: $($missingComputers.Count)"
 Write-Host "Total Devices Ineligible for Hybrid Join: $($ineligibleHybridJoin.Count)"
-Write-Host "Total Windows Devices Exported: $($allWindowsDevices.Count)`n"
+Write-Host "Total Windows Devices Exported: $totalWindowsDeviceCount`n"
 
 if ($missingComputers.Count -gt 0) {
     Write-Host "Exported ungrouped devices to UngroupedComputers.xlsx" -ForegroundColor Yellow
@@ -208,7 +212,7 @@ if ($ineligibleHybridJoin.Count -gt 0) {
     Write-Host "All devices appear to meet Hybrid Join OS requirements." -ForegroundColor Green
 }
 
-if ($allWindowsDevices.Count -gt 0) {
+if ($totalWindowsDeviceCount -gt 0) {
     Write-Host "Exported all Windows devices to AllWindowsDevices.xlsx" -ForegroundColor Cyan
 }
 
