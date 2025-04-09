@@ -166,37 +166,27 @@ if ($ineligibleHybridJoin.Count -gt 0) {
     Write-Host "All devices meet the OS version requirements for Hybrid Join." -ForegroundColor Green
 }
 
-# === Export: All Windows Devices - Detailed ===
-try {
-    $allWindowsDetailed = Get-ADComputer -Filter * -Properties OperatingSystem, OperatingSystemVersion | Where-Object {
-        $_.OperatingSystem -match "Windows"
-    } | ForEach-Object {
-        [PSCustomObject]@{
-            Name                   = $_.Name
-            ObjectGUID             = $_.ObjectGUID
-            OperatingSystem        = $_.OperatingSystem
-            OperatingSystemVersion = $_.OperatingSystemVersion
-        }
-    }
+# === Export: All Windows Devices - Append to TXT Instead of Excel ===
+$windowsDevices = Get-ADComputer -Filter * -Properties OperatingSystem, OperatingSystemVersion | Where-Object {
+    $_.OperatingSystem -match "Windows"
+}
 
-    if ($allWindowsDetailed.Count -gt 0) {
-        $allWindowsDetailed | Export-Excel -Path "$outputFolder\AllWindowsDevices_Detailed.xlsx" -AutoSize -ErrorAction Stop
-        Write-Host "Exported all Windows devices with OS version and ID to AllWindowsDevices_Detailed.xlsx" -ForegroundColor Cyan
-    } else {
-        Write-Host "No Windows devices found for detailed export." -ForegroundColor Yellow
-    }
+$reportFile = Join-Path $outputFolder "AllWindowsDevices_Detailed.txt"
+
+"==== Windows AD Devices Report ====" | Out-File -FilePath $reportFile -Encoding UTF8
+$windowsDevices | ForEach-Object {
+    $line = "Name: $($_.Name) | ObjectGUID: $($_.ObjectGUID) | OS: $($_.OperatingSystem) | Version: $($_.OperatingSystemVersion)"
+    $line | Out-File -FilePath $reportFile -Append -Encoding UTF8
 }
-catch {
-    Write-Host "Error exporting AllWindowsDevices_Detailed.xlsx: $_" -ForegroundColor Red
-}
+
+Write-Host "Appended all Windows device details to AllWindowsDevices_Detailed.txt" -ForegroundColor Cyan
 
 # === Console Summary ===
 Write-Host "`n==== AD Computer Group Coverage Report ====" -ForegroundColor Cyan
 Write-Host "Total Windows AD Computers: $($allComputerNames.Count)"
 Write-Host "Total Computers in Device-Only Groups: $($groupedComputers.Count)"
 Write-Host "Computers NOT in Any Device-Only Group: $($missingComputers.Count)"
-Write-Host "Total Devices Ineligible for Hybrid Join: $($ineligibleHybridJoin.Count)"
-Write-Host "Exported all Windows devices to AllWindowsDevices_Detailed.xlsx`n"
+Write-Host "Total Devices Ineligible for Hybrid Join: $($ineligibleHybridJoin.Count)`n"
 
 if ($missingComputers.Count -gt 0) {
     Write-Host "Exported ungrouped devices to UngroupedComputers.xlsx" -ForegroundColor Yellow
