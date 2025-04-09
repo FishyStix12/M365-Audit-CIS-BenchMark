@@ -180,7 +180,9 @@ if ($allWindowsDevices.Count -gt 0) {
 Write-Host "`n==== AD Computer Group Coverage Report ====" -ForegroundColor Cyan
 Write-Host "Total Windows AD Computers: $($allComputerNames.Count)"
 Write-Host "Total Computers in Device-Only Groups: $($groupedComputers.Count)"
-Write-Host "Computers NOT in Any Device-Only Group: $($missingComputers.Count)`n"
+Write-Host "Computers NOT in Any Device-Only Group: $($missingComputers.Count)"
+Write-Host "Total Devices Ineligible for Hybrid Join: $($ineligibleHybridJoin.Count)"
+Write-Host "Total Windows Devices Exported: $($allWindowsDevices.Count)`n"
 
 if ($missingComputers.Count -gt 0) {
     Write-Host "Exported ungrouped devices to UngroupedComputers.xlsx" -ForegroundColor Yellow
@@ -201,18 +203,20 @@ if ($workstationOnlyGroups.Count -gt 0) {
 }
 
 if ($ineligibleHybridJoin.Count -gt 0) {
-    Write-Host "Some devices are ineligible for Hybrid Join. Check IneligibleForHybridJoin.xlsx" -ForegroundColor DarkYellow
+    Write-Host "Some devices are ineligible for Hybrid Join. See IneligibleForHybridJoin.xlsx" -ForegroundColor DarkYellow
 } else {
     Write-Host "All devices appear to meet Hybrid Join OS requirements." -ForegroundColor Green
+}
+
+if ($allWindowsDevices.Count -gt 0) {
+    Write-Host "Exported all Windows devices to AllWindowsDevices.xlsx" -ForegroundColor Cyan
 }
 
 # === Clean Up ImportExcel if installed by script ===
 foreach ($mod in $installedByScript) {
     if ($mod -eq "ImportExcel") {
         Write-Host "`nCleaning up module: $mod" -ForegroundColor DarkGray
-
         Remove-Module -Name $mod -Force -ErrorAction SilentlyContinue
-
         try {
             Uninstall-Module -Name $mod -AllVersions -Force -ErrorAction Stop
             Write-Host "Module '$mod' successfully uninstalled." -ForegroundColor Green
