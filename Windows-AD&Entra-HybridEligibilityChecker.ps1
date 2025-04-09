@@ -1,4 +1,14 @@
-# DeviceGroupChecker.ps1
+#################################################################################################
+# Author: Nicholas Fisher
+# Date: April 9 2025
+# Description of Script
+# DeviceGroupChecker.ps1 is a PowerShell auditing tool that scans Active Directory computer 
+# objects, filters for Windows-based devices, and evaluates their group memberships. It generates
+# Excel reports showing ungrouped devices, workstation-only groups, mixed server/workstation 
+# groups, and devices that are ineligible for Hybrid Azure AD Join. A final report lists all 
+# Windows systems, and the script automatically installs required modules, organizes outputs in 
+# a clean ADReports folder, and cleans up when complete.
+#################################################################################################
 
 # === Module Check for ImportExcel Only ===
 $installedByScript = @()
