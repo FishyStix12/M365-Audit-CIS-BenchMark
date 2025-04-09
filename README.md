@@ -2,6 +2,6 @@
 # By: Nicholas Fisher
 ![image](https://github.com/user-attachments/assets/52766c9a-f9ed-4127-afe8-5f1bf401fb8f)<br />
 **Welcome to the main branch of this PowerShell repository! This repository serves as a centralized collection of PowerShell Scripts used to conduct the CIS M365 version 4 Benchmark Assessment.** <br />
-**Descriptions of Scripts in this repository:** <br />
-1. `M365Testversion-7-2.ps1` - The provided PowerShell script is designed to run on PowerShell version 7.2 and to support auditing and management of Microsoft 365 environments based on Version 4.0 of the CIS M365 Benchmark. It defines a custom module path and installs essential PowerShell modules, including Az, PnP.PowerShell, AzureAD, MSOnline, and ExchangeOnlineManagement, to facilitate automated security assessments. The script aims to streamline the evaluation of M365 configurations against the CIS Benchmark, ensuring compliance with security best practices and enhancing the overall security posture. <br />
-2. `Windows-AD&Entra-HybridEligibilityChecker.ps1` - is a PowerShell auditing tool that scans Active Directory computer objects, filters for Windows-based devices, and evaluates their group memberships. It generates Excel reports showing ungrouped devices, workstation-only groups, mixed server/workstation groups, and devices that are ineligible for Hybrid Azure AD Join. A final report lists all Windows systems, and the script automatically installs required modules, organizes outputs in a clean ADReports folder, and cleans up when complete. <br />
+**Descriptions of Folders in this repository:** <br />
+1. M365 Assessments - Scripts to Automate the M365 CIS Benchmark Automated Controls across the M365 tenant. <br />
+2. Entra - Scripts geared torward automating, configuring, and managing Entra. <br />
