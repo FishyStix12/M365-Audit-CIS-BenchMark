@@ -1,4 +1,3 @@
-
 # DeviceGroupChecker.ps1
 
 # === Module Check for ImportExcel Only ===
@@ -11,6 +10,7 @@ if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
     $installedByScript += "ImportExcel"
 }
 
+# Load required modules
 Import-Module ActiveDirectory
 Import-Module ImportExcel
 
@@ -23,6 +23,7 @@ $allComputers = Get-ADComputer -Filter * -Properties OperatingSystem
 $allComputerNames = $allComputers | Select-Object -ExpandProperty Name
 $allGroups = Get-ADGroup -Filter *
 
+# Initialize arrays
 $deviceOnlyGroups = @()
 $mixedGroups = @()
 $workstationOnlyGroups = @()
@@ -30,6 +31,7 @@ $groupedComputers = @()
 $workstationOnlyDetails = @()
 $mixedGroupDetails = @()
 
+# === Analyze Groups ===
 foreach ($group in $allGroups) {
     $members = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive | Where-Object { $_.objectClass -eq "computer" }
 
@@ -112,6 +114,51 @@ if ($workstationOnlyDetails.Count -gt 0) {
     $workstationOnlyDetails | Export-Excel -Path "$outputFolder\WorkstationOnlyGroups_Detailed.xlsx" -AutoSize
 }
 
+# === Identify Devices Ineligible for Hybrid Join ===
+
+$ineligibleHybridJoin = @()
+
+foreach ($computer in $allComputers) {
+    $os = $computer.OperatingSystem
+    $name = $computer.Name
+
+    $isEligible = $false
+
+    if ($os -match "Windows 10") {
+        # Extract version if possible (e.g., Windows 10 Enterprise 1909)
+        if ($os -match "Windows 10.*?(\d{4})") {
+            $version = [int]$matches[1]
+            if ($version -ge 1607) { $isEligible = $true }
+        } else {
+            # Default to eligible if version is unknown
+            $isEligible = $true
+        }
+    }
+    elseif ($os -match "Windows 11") {
+        $isEligible = $true
+    }
+    elseif ($os -match "Windows Server") {
+        if ($os -match "2016|2019|2022") {
+            $isEligible = $true
+        }
+    }
+
+    if (-not $isEligible) {
+        $ineligibleHybridJoin += [PSCustomObject]@{
+            ComputerName     = $name
+            OperatingSystem  = $os
+        }
+    }
+}
+
+# Export Ineligible Devices
+if ($ineligibleHybridJoin.Count -gt 0) {
+    $ineligibleHybridJoin | Export-Excel -Path "$outputFolder\IneligibleForHybridJoin.xlsx" -AutoSize
+    Write-Host "Exported devices ineligible for Hybrid Join to IneligibleForHybridJoin.xlsx" -ForegroundColor Yellow
+} else {
+    Write-Host "All devices meet the OS version requirements for Hybrid Join." -ForegroundColor Green
+}
+
 # === Console Summary ===
 Write-Host "`n==== AD Computer Group Coverage Report ====" -ForegroundColor Cyan
 Write-Host "Total AD Computers: $($allComputerNames.Count)"
@@ -136,10 +183,26 @@ if ($workstationOnlyGroups.Count -gt 0) {
     Write-Host "No workstation-only groups found." -ForegroundColor Yellow
 }
 
+if ($ineligibleHybridJoin.Count -gt 0) {
+    Write-Host "Some devices are ineligible for Hybrid Join. Check IneligibleForHybridJoin.xlsx" -ForegroundColor DarkYellow
+} else {
+    Write-Host "All devices appear to meet Hybrid Join OS requirements." -ForegroundColor Green
+}
+
 # === Clean Up ImportExcel if installed by script ===
 foreach ($mod in $installedByScript) {
     if ($mod -eq "ImportExcel") {
         Write-Host "`nCleaning up module: $mod" -ForegroundColor DarkGray
-        Uninstall-Module -Name $mod -AllVersions -Force
+
+        # Unload the module from session
+        Remove-Module -Name $mod -Force -ErrorAction SilentlyContinue
+
+        # Try uninstalling from disk
+        try {
+            Uninstall-Module -Name $mod -AllVersions -Force -ErrorAction Stop
+            Write-Host "Module '$mod' successfully uninstalled." -ForegroundColor Green
+        } catch {
+            Write-Warning "Failed to uninstall module '$mod': $_"
+        }
     }
 }
