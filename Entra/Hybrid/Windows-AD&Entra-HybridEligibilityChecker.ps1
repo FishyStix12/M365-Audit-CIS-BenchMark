@@ -2,12 +2,11 @@
 # Author: Nicholas Fisher
 # Date: April 9 2025
 # Description of Script
-# DeviceGroupChecker.ps1 is a PowerShell auditing tool that scans Active Directory computer 
-# objects, filters for Windows-based devices, and evaluates their group memberships. It generates
-# Excel reports showing ungrouped devices, workstation-only groups, mixed server/workstation 
-# groups, and devices that are ineligible for Hybrid Azure AD Join. A final report lists all 
-# Windows systems, and the script automatically installs required modules, organizes outputs in 
-# a clean ADReports folder, and cleans up when complete.
+# Windows-AD&Entra-HybridEligibilityChecker.ps1 - helps support a multi-stage hybrid join rollout into Entra by 
+# separating Windows 11 and Windows Server devices. It allows you to onboard in phases, making 
+# it easier to test, track, and manage device readiness. By checking OS versions and grouping 
+# devices, it enables targeting through Entra groups for things like Intune auto-enrollment and 
+# policy assignments tied to hybrid-joined status.
 #################################################################################################
 # === Module Check for ImportExcel Only ===
 $installedByScript = @()
