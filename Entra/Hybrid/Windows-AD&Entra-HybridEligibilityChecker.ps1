@@ -9,18 +9,15 @@
 # Windows systems, and the script automatically installs required modules, organizes outputs in 
 # a clean ADReports folder, and cleans up when complete.
 #################################################################################################
-
 # === Module Check for ImportExcel Only ===
 $installedByScript = @()
 
-# Check and install ImportExcel if needed
 if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
     Write-Host "'ImportExcel' not found. Installing from PowerShell Gallery..." -ForegroundColor Yellow
     Install-Module -Name ImportExcel -Scope CurrentUser -Force -ErrorAction Stop
     $installedByScript += "ImportExcel"
 }
 
-# Load required modules
 Import-Module ActiveDirectory
 Import-Module ImportExcel
 
@@ -28,12 +25,14 @@ Import-Module ImportExcel
 $outputFolder = "$PSScriptRoot\ADReports"
 New-Item -Path $outputFolder -ItemType Directory -Force | Out-Null
 
-# === Gather AD Data ===
-$allComputers = Get-ADComputer -Filter * -Properties OperatingSystem
+# === Gather Windows-Only AD Computer Objects ===
+$allComputers = Get-ADComputer -Filter * -Properties OperatingSystem | Where-Object {
+    $_.OperatingSystem -match "Windows"
+}
 $allComputerNames = $allComputers | Select-Object -ExpandProperty Name
 $allGroups = Get-ADGroup -Filter *
 
-# Initialize arrays
+# === Initialize Collections ===
 $deviceOnlyGroups = @()
 $mixedGroups = @()
 $workstationOnlyGroups = @()
@@ -41,7 +40,7 @@ $groupedComputers = @()
 $workstationOnlyDetails = @()
 $mixedGroupDetails = @()
 
-# === Analyze Groups ===
+# === Analyze Group Membership ===
 foreach ($group in $allGroups) {
     $members = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive | Where-Object { $_.objectClass -eq "computer" }
 
@@ -53,6 +52,8 @@ foreach ($group in $allGroups) {
 
         foreach ($member in $members) {
             $computer = Get-ADComputer -Identity $member.SamAccountName -Properties OperatingSystem
+            if ($computer.OperatingSystem -notmatch "Windows") { continue }
+
             $groupedComputers += $computer.Name
             $type = "Workstation"
 
@@ -125,7 +126,6 @@ if ($workstationOnlyDetails.Count -gt 0) {
 }
 
 # === Identify Devices Ineligible for Hybrid Join ===
-
 $ineligibleHybridJoin = @()
 
 foreach ($computer in $allComputers) {
@@ -135,12 +135,10 @@ foreach ($computer in $allComputers) {
     $isEligible = $false
 
     if ($os -match "Windows 10") {
-        # Extract version if possible (e.g., Windows 10 Enterprise 1909)
         if ($os -match "Windows 10.*?(\d{4})") {
             $version = [int]$matches[1]
             if ($version -ge 1607) { $isEligible = $true }
         } else {
-            # Default to eligible if version is unknown
             $isEligible = $true
         }
     }
@@ -161,7 +159,6 @@ foreach ($computer in $allComputers) {
     }
 }
 
-# Export Ineligible Devices
 if ($ineligibleHybridJoin.Count -gt 0) {
     $ineligibleHybridJoin | Export-Excel -Path "$outputFolder\IneligibleForHybridJoin.xlsx" -AutoSize
     Write-Host "Exported devices ineligible for Hybrid Join to IneligibleForHybridJoin.xlsx" -ForegroundColor Yellow
@@ -169,9 +166,19 @@ if ($ineligibleHybridJoin.Count -gt 0) {
     Write-Host "All devices meet the OS version requirements for Hybrid Join." -ForegroundColor Green
 }
 
+# === Export: All Windows Devices ===
+$allWindowsDevices = $allComputers | Select-Object Name, OperatingSystem
+
+if ($allWindowsDevices.Count -gt 0) {
+    $allWindowsDevices | Export-Excel -Path "$outputFolder\AllWindowsDevices.xlsx" -AutoSize
+    Write-Host "Exported list of all Windows devices to AllWindowsDevices.xlsx" -ForegroundColor Cyan
+} else {
+    Write-Host "No Windows devices found in Active Directory." -ForegroundColor Yellow
+}
+
 # === Console Summary ===
 Write-Host "`n==== AD Computer Group Coverage Report ====" -ForegroundColor Cyan
-Write-Host "Total AD Computers: $($allComputerNames.Count)"
+Write-Host "Total Windows AD Computers: $($allComputerNames.Count)"
 Write-Host "Total Computers in Device-Only Groups: $($groupedComputers.Count)"
 Write-Host "Computers NOT in Any Device-Only Group: $($missingComputers.Count)`n"
 
@@ -204,10 +211,8 @@ foreach ($mod in $installedByScript) {
     if ($mod -eq "ImportExcel") {
         Write-Host "`nCleaning up module: $mod" -ForegroundColor DarkGray
 
-        # Unload the module from session
         Remove-Module -Name $mod -Force -ErrorAction SilentlyContinue
 
-        # Try uninstalling from disk
         try {
             Uninstall-Module -Name $mod -AllVersions -Force -ErrorAction Stop
             Write-Host "Module '$mod' successfully uninstalled." -ForegroundColor Green
