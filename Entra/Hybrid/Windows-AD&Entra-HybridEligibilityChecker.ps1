@@ -167,10 +167,7 @@ if ($ineligibleHybridJoin.Count -gt 0) {
 }
 
 # === Export: All Windows Devices ===
-$allWindowsDevices = $allComputers | Where-Object {
-    $_.OperatingSystem -match "Windows"
-} | Select-Object Name, OperatingSystem
-
+$allWindowsDevices = $allComputers | Select-Object Name, OperatingSystem
 $totalWindowsDeviceCount = $allWindowsDevices.Count
 
 if ($totalWindowsDeviceCount -gt 0) {
