@@ -167,15 +167,27 @@ if ($ineligibleHybridJoin.Count -gt 0) {
 }
 
 # === Export: All Windows Devices - Detailed ===
-$allWindowsDetailed = Get-ADComputer -Filter * -Properties OperatingSystem, OperatingSystemVersion | Where-Object {
-    $_.OperatingSystem -match "Windows"
-} | Select-Object Name, ObjectGUID, OperatingSystem, OperatingSystemVersion
+try {
+    $allWindowsDetailed = Get-ADComputer -Filter * -Properties OperatingSystem, OperatingSystemVersion | Where-Object {
+        $_.OperatingSystem -match "Windows"
+    } | ForEach-Object {
+        [PSCustomObject]@{
+            Name                   = $_.Name
+            ObjectGUID             = $_.ObjectGUID
+            OperatingSystem        = $_.OperatingSystem
+            OperatingSystemVersion = $_.OperatingSystemVersion
+        }
+    }
 
-if ($allWindowsDetailed.Count -gt 0) {
-    $allWindowsDetailed | Export-Excel -Path "$outputFolder\AllWindowsDevices_Detailed.xlsx" -AutoSize
-    Write-Host "Exported all Windows devices with OS version and ID to AllWindowsDevices_Detailed.xlsx" -ForegroundColor Cyan
-} else {
-    Write-Host "No Windows devices found for detailed export." -ForegroundColor Yellow
+    if ($allWindowsDetailed.Count -gt 0) {
+        $allWindowsDetailed | Export-Excel -Path "$outputFolder\AllWindowsDevices_Detailed.xlsx" -AutoSize -ErrorAction Stop
+        Write-Host "Exported all Windows devices with OS version and ID to AllWindowsDevices_Detailed.xlsx" -ForegroundColor Cyan
+    } else {
+        Write-Host "No Windows devices found for detailed export." -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "Error exporting AllWindowsDevices_Detailed.xlsx: $_" -ForegroundColor Red
 }
 
 # === Console Summary ===
