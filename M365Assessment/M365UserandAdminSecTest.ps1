@@ -1,3 +1,13 @@
+#################################################################################################
+# Author: Nicholas Fisher
+# Date: April 10 2025
+# Description of Script
+# M365UserandAdminSecTest.ps1 - audits Microsoft 365 user and administrator security 
+# configurations. It collects details about global admins, privileged role assignments, and 
+# user settings to assess risks such as excessive privileges or inactive high-privilege accounts. 
+# Results are exported to CSV files for reporting and review, helping strengthen the overall 
+# security posture of M365 environments.
+#################################################################################################
 # Set up a consistent output folder
 $outputDirectory = Join-Path -Path $PSScriptRoot -ChildPath "Scripts-M365Assessment-Reports"
 
