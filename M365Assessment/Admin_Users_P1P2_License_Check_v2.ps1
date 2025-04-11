@@ -1,59 +1,42 @@
 <#
 .SYNOPSIS
-Audits all Azure AD roles containing "Admin" or "Administrator" and finds users without P1 or P2 licenses.
+Audits Azure AD admin role users missing P1 or P2 licenses.
 
 .AUTHOR
 Nicholas Fisher
-
-.LAST UPDATED
-April 11, 2025
 #>
 
-# Set output directory
-$outputDirectory = Join-Path -Path $PSScriptRoot -ChildPath "Scripts-M365Assessment-Reports"
+# Output directory
+$outputDirectory = Join-Path -Path $HOME -ChildPath "Scripts-M365Assessment-Reports"
 if (-not (Test-Path $outputDirectory)) {
     New-Item -ItemType Directory -Path $outputDirectory | Out-Null
 }
 
-# Force TLS 1.2 for PowerShell Gallery access
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-# Install NuGet provider silently if missing
-if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
-    Write-Host "NuGet provider not found. Installing..."
-    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
-    Import-PackageProvider -Name NuGet -Force
-}
-
-# Install Microsoft.Graph module if not already installed
-$graphModule = "Microsoft.Graph"
-if (-not (Get-Module -ListAvailable -Name $graphModule)) {
-    Write-Host "Microsoft.Graph module not found. Attempting installation..."
+# Cloud Shell: Do not try to install/remove modules, just import if needed
+if (-not (Get-Module -Name Microsoft.Graph)) {
     try {
-        Install-Module $graphModule -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+        Import-Module Microsoft.Graph -ErrorAction Stop
     } catch {
-        Write-Warning "Microsoft.Graph module could not be installed. It may be in use or locked."
+        Write-Warning "Microsoft.Graph is already loaded or partially loaded. Continuing."
     }
 }
 
-# Import Microsoft.Graph module
+# Connect to Graph
 try {
-    Import-Module $graphModule -Force -ErrorAction Stop
+    Connect-MgGraph -Scopes "User.Read.All", "Directory.Read.All", "RoleManagement.Read.Directory"
 } catch {
-    Write-Warning "Microsoft.Graph module could not be fully imported. Some components may already be loaded."
+    Write-Error "Could not connect to Microsoft Graph. Exiting."
+    exit
 }
 
-# Connect to Microsoft Graph
-Connect-MgGraph -Scopes "User.Read.All", "Directory.Read.All", "RoleManagement.Read.Directory"
-
-# Retrieve P1 and P2 SKU IDs
+# Get P1/P2 SKUs
 $skus = Get-MgSubscribedSku
 $p1Sku = $skus | Where-Object { $_.SkuPartNumber -eq "ENTERPRISEPREMIUM" }
 $p2Sku = $skus | Where-Object { $_.SkuPartNumber -eq "ENTERPRISEPREMIUM2" }
 $p1SkuId = $p1Sku.SkuId
 $p2SkuId = $p2Sku.SkuId
 
-# Filter roles with "admin" or "administrator" in the name
+# Get admin roles
 $allRoles = Get-MgRoleManagementDirectoryRoleDefinition -Filter "isBuiltIn eq true"
 $adminRoles = $allRoles | Where-Object { $_.DisplayName -match "admin|administrator" }
 
@@ -116,23 +99,17 @@ foreach ($role in $adminRoles) {
     }
 }
 
-# Export results
+# Export
 $outputFile = Join-Path $outputDirectory -ChildPath "AdminsMissingP1P2.csv"
 if ($usersWithoutP1P2.Count -gt 0) {
     $usersWithoutP1P2 | Sort-Object UserPrincipalName | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
-    Write-Host "Exported results to: $outputFile. Total non-compliant users: $($usersWithoutP1P2.Count)"
+    Write-Host "Exported results to: $outputFile"
 } else {
-    Write-Host "All admin users have P1 or P2 licenses. No CSV created."
+    Write-Host "All admin users have P1 or P2 licenses."
 }
 
-# Cleanup session
 Disconnect-MgGraph
-try {
-    Get-Module Microsoft.Graph* | Remove-Module -Force -ErrorAction Stop
-    Write-Host "Graph session disconnected and modules removed."
-} catch {
-    Write-Warning "Modules are currently in use and could not be removed. This will not impact results."
-}
+Write-Host "Graph session disconnected."
 
 # Cleanup
 Disconnect-MgGraph
