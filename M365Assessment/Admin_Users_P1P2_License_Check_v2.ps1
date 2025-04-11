@@ -1,42 +1,32 @@
 <#
 .SYNOPSIS
-Audits Azure AD admin role users missing P1 or P2 licenses.
+Cloud Shell Safe: Audits AAD admin roles for P1/P2 license compliance.
 
-.AUTHOR
-Nicholas Fisher
+.NOTES
+Run only in environments where Microsoft.Graph is pre-installed and pre-loaded (e.g., Azure Cloud Shell).
 #>
 
-# Output directory
-$outputDirectory = Join-Path -Path $HOME -ChildPath "Scripts-M365Assessment-Reports"
+$outputDirectory = Join-Path $HOME -ChildPath "Scripts-M365Assessment-Reports"
 if (-not (Test-Path $outputDirectory)) {
     New-Item -ItemType Directory -Path $outputDirectory | Out-Null
 }
 
-# Cloud Shell: Do not try to install/remove modules, just import if needed
-if (-not (Get-Module -Name Microsoft.Graph)) {
-    try {
-        Import-Module Microsoft.Graph -ErrorAction Stop
-    } catch {
-        Write-Warning "Microsoft.Graph is already loaded or partially loaded. Continuing."
-    }
-}
-
-# Connect to Graph
+# Skip module handling entirely; Cloud Shell has Graph preloaded
 try {
     Connect-MgGraph -Scopes "User.Read.All", "Directory.Read.All", "RoleManagement.Read.Directory"
 } catch {
-    Write-Error "Could not connect to Microsoft Graph. Exiting."
+    Write-Error "Graph connection failed. Exiting."
     exit
 }
 
-# Get P1/P2 SKUs
+# Get P1/P2 license SKU IDs
 $skus = Get-MgSubscribedSku
 $p1Sku = $skus | Where-Object { $_.SkuPartNumber -eq "ENTERPRISEPREMIUM" }
 $p2Sku = $skus | Where-Object { $_.SkuPartNumber -eq "ENTERPRISEPREMIUM2" }
 $p1SkuId = $p1Sku.SkuId
 $p2SkuId = $p2Sku.SkuId
 
-# Get admin roles
+# Get all admin role definitions
 $allRoles = Get-MgRoleManagementDirectoryRoleDefinition -Filter "isBuiltIn eq true"
 $adminRoles = $allRoles | Where-Object { $_.DisplayName -match "admin|administrator" }
 
@@ -89,29 +79,4 @@ foreach ($role in $adminRoles) {
                             }
                         }
                     } catch {
-                        Write-Warning "Failed to check license for $upn"
-                    }
-                }
-            } catch {
-                Write-Warning "Failed to resolve members of group $groupId"
-            }
-        }
-    }
-}
-
-# Export
-$outputFile = Join-Path $outputDirectory -ChildPath "AdminsMissingP1P2.csv"
-if ($usersWithoutP1P2.Count -gt 0) {
-    $usersWithoutP1P2 | Sort-Object UserPrincipalName | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
-    Write-Host "Exported results to: $outputFile"
-} else {
-    Write-Host "All admin users have P1 or P2 licenses."
-}
-
-Disconnect-MgGraph
-Write-Host "Graph session disconnected."
-
-# Cleanup
-Disconnect-MgGraph
-Remove-Module Microsoft.Graph -Force -ErrorAction SilentlyContinue
-Write-Host "Graph session disconnected and module removed. Script complete."
+                        Write-Warning "
