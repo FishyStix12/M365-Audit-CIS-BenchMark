@@ -15,6 +15,16 @@ if (-not (Test-Path $outputDirectory)) {
     New-Item -ItemType Directory -Path $outputDirectory | Out-Null
 }
 
+# Ensure TLS 1.2 is used for secure downloads (required by PowerShell Gallery)
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Check for NuGet provider and install if missing
+if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+    Write-Host "NuGet provider not found. Installing..."
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+    Import-PackageProvider -Name NuGet -Force
+}
+
 # Check, install, and import Microsoft.Graph if needed
 $graphModule = "Microsoft.Graph"
 $graphInstalled = Get-Module -ListAvailable -Name $graphModule
